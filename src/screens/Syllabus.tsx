@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 import { COURSES } from '../data/constants'
-import type { Course, CourseModule, Lesson } from '../types'
+import type { Course, CourseModule, Lesson, Quiz } from '../types'
 
 export default function SyllabusScreen() {
   const { params, toast, openModal, closeModal } = useApp()
@@ -63,6 +63,7 @@ export default function SyllabusScreen() {
   function openAddLesson(moduleId: string) {
     openModal({
       title: 'Add Lesson',
+      wide: true,
       body: <LessonForm onSave={async d => {
         const count = (lessons[moduleId] ?? []).length
         await supabase.from('lessons').insert({ ...d, module_id: moduleId, order_index: count + 1 })
@@ -134,20 +135,207 @@ function ModuleForm({ onSave }: { onSave: (d: { title: string }) => void }) {
 }
 
 function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
-  const [form, setForm] = useState<{ title: string; type: 'video'|'doc'|'quiz'|'eval'; duration_text: string; requirement: string }>({ title: '', type: 'video', duration_text: '', requirement: '' })
+  const [form, setForm] = useState<{
+    title: string; type: 'video'|'doc'|'quiz'|'eval'
+    duration_text: string; requirement: string
+    video_url: string; doc_url: string; doc_filename: string; quiz_id: string
+  }>({
+    title: '', type: 'video', duration_text: '', requirement: '',
+    video_url: '', doc_url: '', doc_filename: '', quiz_id: '',
+  })
+
+  const [quizzes, setQuizzes] = useState<Quiz[]>([])
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [docFile, setDocFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const videoRef = useRef<HTMLInputElement>(null)
+  const docRef = useRef<HTMLInputElement>(null)
+
+  const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    supabase.from('quizzes').select('id,title').order('title').then(({ data }) => {
+      if (data) setQuizzes(data as Quiz[])
+    })
+  }, [])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setUploadError('')
+    let videoUrl = form.video_url
+    let docUrl = form.doc_url
+    let docFilename = form.doc_filename
+
+    try {
+      setUploading(true)
+      if (videoFile) {
+        const path = `courses/${Date.now()}-${videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+        const { error } = await supabase.storage.from('course-videos').upload(path, videoFile, { upsert: true })
+        if (error) throw new Error(`Video upload failed: ${error.message}`)
+        videoUrl = supabase.storage.from('course-videos').getPublicUrl(path).data.publicUrl
+      }
+      if (docFile) {
+        const path = `${Date.now()}-${docFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+        const { error } = await supabase.storage.from('materials').upload(path, docFile, { upsert: true })
+        if (error) throw new Error(`Document upload failed: ${error.message}`)
+        docUrl = supabase.storage.from('materials').getPublicUrl(path).data.publicUrl
+        docFilename = docFile.name
+      }
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed')
+      setUploading(false)
+      return
+    }
+
+    setUploading(false)
+    onSave({
+      title: form.title,
+      type: form.type,
+      duration_text: form.duration_text,
+      requirement: form.requirement,
+      video_url: videoUrl || undefined,
+      doc_url: docUrl || undefined,
+      doc_filename: docFilename || undefined,
+      quiz_id: form.quiz_id || undefined,
+    })
+  }
+
+  const defaultRequirement: Record<string, string> = {
+    video: 'Watch 90%', doc: 'Acknowledge read', quiz: 'Score ≥80%', eval: 'Complete all questions',
+  }
+
+  function handleTypeChange(t: 'video'|'doc'|'quiz'|'eval') {
+    set('type', t)
+    if (!form.requirement) set('requirement', defaultRequirement[t])
+  }
+
   return (
-    <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave(form) }}>
-      <div className="form-group"><label>Title</label><input value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))} required /></div>
+    <form className="modal-form" onSubmit={handleSubmit}>
+      <div className="form-group">
+        <label>Title</label>
+        <input value={form.title} onChange={e => set('title', e.target.value)} required />
+      </div>
+
       <div className="form-row">
-        <div className="form-group"><label>Type</label>
-          <select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value as 'video'|'doc'|'quiz'|'eval'}))}>
-            <option value="video">Video</option><option value="doc">Document</option><option value="quiz">Quiz</option><option value="eval">Evaluation</option>
+        <div className="form-group">
+          <label>Type</label>
+          <select value={form.type} onChange={e => handleTypeChange(e.target.value as 'video'|'doc'|'quiz'|'eval')}>
+            <option value="video">Video</option>
+            <option value="doc">Document</option>
+            <option value="quiz">Quiz</option>
+            <option value="eval">Evaluation</option>
           </select>
         </div>
-        <div className="form-group"><label>Duration</label><input value={form.duration_text} onChange={e => setForm(f => ({...f, duration_text: e.target.value}))} /></div>
+        <div className="form-group">
+          <label>Duration</label>
+          <input
+            value={form.duration_text}
+            placeholder={form.type === 'video' ? '12 min' : form.type === 'doc' ? '10 min read' : '15 min'}
+            onChange={e => set('duration_text', e.target.value)}
+          />
+        </div>
       </div>
-      <div className="form-group"><label>Requirement</label><input value={form.requirement} onChange={e => setForm(f => ({...f, requirement: e.target.value}))} /></div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">Add Lesson</button></div>
+
+      <div className="form-group">
+        <label>Requirement</label>
+        <input
+          value={form.requirement}
+          placeholder={defaultRequirement[form.type]}
+          onChange={e => set('requirement', e.target.value)}
+        />
+      </div>
+
+      {/* ── Video content ── */}
+      {form.type === 'video' && (
+        <div className="form-section">
+          <div className="form-section-label">Video Content</div>
+          <div className="form-group">
+            <label>Upload Video File</label>
+            <input
+              ref={videoRef}
+              type="file"
+              accept="video/*"
+              onChange={e => { setVideoFile(e.target.files?.[0] ?? null); set('video_url', '') }}
+            />
+            {videoFile && (
+              <div className="upload-preview">
+                <span>📹 {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)} MB)</span>
+                <button type="button" className="btn btn-sm btn-outline" onClick={() => { setVideoFile(null); if (videoRef.current) videoRef.current.value = '' }}>Remove</button>
+              </div>
+            )}
+          </div>
+          {!videoFile && (
+            <div className="form-group">
+              <label>Or paste a video URL</label>
+              <input
+                type="url"
+                value={form.video_url}
+                placeholder="https://example.com/video.mp4"
+                onChange={e => set('video_url', e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Document content ── */}
+      {form.type === 'doc' && (
+        <div className="form-section">
+          <div className="form-section-label">Document Content</div>
+          <div className="form-group">
+            <label>Upload Document</label>
+            <input
+              ref={docRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+              onChange={e => { setDocFile(e.target.files?.[0] ?? null); set('doc_url', '') }}
+            />
+            {docFile && (
+              <div className="upload-preview">
+                <span>📄 {docFile.name} ({(docFile.size / 1024 / 1024).toFixed(1)} MB)</span>
+                <button type="button" className="btn btn-sm btn-outline" onClick={() => { setDocFile(null); if (docRef.current) docRef.current.value = '' }}>Remove</button>
+              </div>
+            )}
+          </div>
+          {!docFile && (
+            <div className="form-group">
+              <label>Or paste a document URL</label>
+              <input
+                type="url"
+                value={form.doc_url}
+                placeholder="https://example.com/document.pdf"
+                onChange={e => set('doc_url', e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Quiz content ── */}
+      {form.type === 'quiz' && (
+        <div className="form-section">
+          <div className="form-section-label">Quiz</div>
+          <div className="form-group">
+            <label>Select Quiz</label>
+            <select value={form.quiz_id} onChange={e => set('quiz_id', e.target.value)}>
+              <option value="">— Choose a quiz —</option>
+              {quizzes.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
+            </select>
+            {quizzes.length === 0 && (
+              <span className="form-hint">No quizzes yet — create one in the Quizzes section first.</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {uploadError && <div className="form-error">{uploadError}</div>}
+
+      <div className="modal-form-actions">
+        <button type="submit" className="btn btn-primary" disabled={uploading}>
+          {uploading ? 'Uploading…' : 'Add Lesson'}
+        </button>
+      </div>
     </form>
   )
 }

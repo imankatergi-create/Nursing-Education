@@ -74,6 +74,10 @@ export interface Lesson {
   requirement: string
   locked_note?: string
   order_index: number
+  video_url?: string
+  doc_url?: string
+  doc_filename?: string
+  quiz_id?: string
 }
 
 export interface Program {
