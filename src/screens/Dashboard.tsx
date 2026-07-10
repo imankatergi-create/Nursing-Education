@@ -2,7 +2,15 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 
-interface Stats { total_nurses: number; active_courses: number; completion_rate: number; overdue_count: number }
+interface Stats {
+  total_nurses: number
+  active_courses: number
+  completion_rate: number
+  overdue_count: number
+  done_pct: number
+  inprog_pct: number
+  overdue_pct: number
+}
 
 const ROLE_DASH: Record<string, { title: string; subtitle: string }> = {
   superadmin: { title: 'System Overview', subtitle: 'Full platform analytics' },
@@ -15,19 +23,41 @@ const ROLE_DASH: Record<string, { title: string; subtitle: string }> = {
 
 export default function Dashboard() {
   const { role, navigate } = useApp()
-  const [stats, setStats] = useState<Stats>({ total_nurses: 0, active_courses: 0, completion_rate: 0, overdue_count: 0 })
+  const [stats, setStats] = useState<Stats>({
+    total_nurses: 0, active_courses: 0, completion_rate: 0,
+    overdue_count: 0, done_pct: 0, inprog_pct: 0, overdue_pct: 0,
+  })
 
   useEffect(() => {
     ;(async () => {
-      const [nurses, courses] = await Promise.all([
+      const [nurses, courses, enrollments] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'nurse'),
         supabase.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('nurse_enrollments').select('status,due_date'),
       ])
-      setStats(s => ({ ...s, total_nurses: nurses.count ?? 142, active_courses: courses.count ?? 24 }))
+      const enr = enrollments.data ?? []
+      const total = enr.length
+      const now = new Date()
+      const done = enr.filter(e => e.status === 'completed').length
+      const overdue = enr.filter(e => e.due_date && new Date(e.due_date) < now && e.status !== 'completed').length
+      const inprog = enr.filter(e => e.status === 'in_progress').length
+
+      const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
+
+      setStats({
+        total_nurses: nurses.count ?? 0,
+        active_courses: courses.count ?? 0,
+        completion_rate: pct(done),
+        overdue_count: overdue,
+        done_pct: pct(done),
+        inprog_pct: pct(inprog),
+        overdue_pct: pct(overdue),
+      })
     })()
   }, [])
 
   const dash = ROLE_DASH[role] ?? ROLE_DASH.admin
+  const circumference = 251.3
 
   return (
     <div className="screen-container">
@@ -42,34 +72,30 @@ export default function Dashboard() {
         <div className="kpi-card kpi-teal">
           <div className="kpi-icon">👥</div>
           <div className="kpi-body">
-            <div className="kpi-value">{stats.total_nurses || 142}</div>
+            <div className="kpi-value">{stats.total_nurses}</div>
             <div className="kpi-label">Total Nurses</div>
           </div>
-          <div className="kpi-delta positive">+12 this month</div>
         </div>
         <div className="kpi-card kpi-blue">
           <div className="kpi-icon">📚</div>
           <div className="kpi-body">
-            <div className="kpi-value">{stats.active_courses || 24}</div>
+            <div className="kpi-value">{stats.active_courses}</div>
             <div className="kpi-label">Active Courses</div>
           </div>
-          <div className="kpi-delta positive">+3 new</div>
         </div>
         <div className="kpi-card kpi-green">
           <div className="kpi-icon">✅</div>
           <div className="kpi-body">
-            <div className="kpi-value">87.4%</div>
+            <div className="kpi-value">{stats.completion_rate}%</div>
             <div className="kpi-label">Completion Rate</div>
           </div>
-          <div className="kpi-delta positive">+2.1% vs last month</div>
         </div>
         <div className="kpi-card kpi-red">
           <div className="kpi-icon">⚠️</div>
           <div className="kpi-body">
-            <div className="kpi-value">18</div>
+            <div className="kpi-value">{stats.overdue_count}</div>
             <div className="kpi-label">Overdue</div>
           </div>
-          <div className="kpi-delta negative">+3 this week</div>
         </div>
       </div>
 
@@ -160,17 +186,18 @@ export default function Dashboard() {
             <svg viewBox="0 0 100 100" className="donut-svg">
               <circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)" strokeWidth="12" />
               <circle cx="50" cy="50" r="40" fill="none" stroke="var(--teal)" strokeWidth="12"
-                strokeDasharray={`${87.4 * 2.513} ${100 * 2.513}`} strokeDashoffset="62.8" strokeLinecap="round" />
+                strokeDasharray={`${(stats.done_pct / 100) * circumference} ${circumference}`}
+                strokeDashoffset="62.8" strokeLinecap="round" />
             </svg>
             <div className="donut-label">
-              <div className="donut-value">87.4%</div>
+              <div className="donut-value">{stats.done_pct}%</div>
               <div className="donut-sub">Compliant</div>
             </div>
           </div>
           <div className="compliance-legend">
-            <div className="legend-row"><span className="legend-dot teal" />Completed <strong>87.4%</strong></div>
-            <div className="legend-row"><span className="legend-dot amber" />In Progress <strong>8.2%</strong></div>
-            <div className="legend-row"><span className="legend-dot red" />Overdue <strong>4.4%</strong></div>
+            <div className="legend-row"><span className="legend-dot teal" />Completed <strong>{stats.done_pct}%</strong></div>
+            <div className="legend-row"><span className="legend-dot amber" />In Progress <strong>{stats.inprog_pct}%</strong></div>
+            <div className="legend-row"><span className="legend-dot red" />Overdue <strong>{stats.overdue_pct}%</strong></div>
           </div>
         </div>
       </div>

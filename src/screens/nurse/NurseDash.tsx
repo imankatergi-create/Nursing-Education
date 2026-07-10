@@ -14,14 +14,15 @@ export default function NurseDash() {
     if (!profile?.id) return
     ;(async () => {
       const [{ data: enroll }, { data: courses }, { data: certs }, { data: notifs }] = await Promise.all([
-        supabase.from('nurse_enrollments').select('status').eq('profile_id', profile.id),
+        supabase.from('nurse_enrollments').select('status,due_date').eq('profile_id', profile.id),
         supabase.from('courses').select('*').order('title').limit(4),
         supabase.from('certificates').select('*').eq('profile_id', profile.id).order('issued_at', { ascending: false }).limit(2),
-        supabase.from('notifications').select('*').order('sent_at', { ascending: false }).limit(4),
+        supabase.from('notifications').select('*').eq('profile_id', profile.id).order('sent_at', { ascending: false }).limit(4),
       ])
       if (enroll) {
+        const now = new Date()
         const done = enroll.filter(e => e.status === 'completed').length
-        const overdue = enroll.filter(e => e.status === 'overdue').length
+        const overdue = enroll.filter(e => e.due_date && new Date(e.due_date) < now && e.status !== 'completed').length
         const inprog = enroll.filter(e => e.status === 'in_progress').length
         setEnrollments({ assigned: enroll.length, done, overdue, inprog })
       }
