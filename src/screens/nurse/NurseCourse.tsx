@@ -40,8 +40,29 @@ export default function NurseCourse() {
   async function loadCourseData() {
     const { data: c } = await supabase.from('courses').select('*').eq('id', courseId).maybeSingle()
     setCourse(c ?? null)
-    const { data: mods } = await supabase.from('course_modules').select('*').eq('course_id', courseId).order('order_index')
-    const modList = mods ?? []
+
+    // Load modules via linked syllabuses; fall back to direct course_id for legacy data
+    let modList: CourseModule[] = []
+    const { data: linked } = await supabase
+      .from('course_syllabuses')
+      .select('syllabus_id')
+      .eq('course_id', courseId)
+    const syllabusIds = (linked ?? []).map((r: any) => r.syllabus_id as string).filter(Boolean)
+    if (syllabusIds.length > 0) {
+      const { data: mods } = await supabase
+        .from('course_modules')
+        .select('*')
+        .in('syllabus_id', syllabusIds)
+        .order('order_index')
+      modList = mods ?? []
+    } else {
+      const { data: mods } = await supabase
+        .from('course_modules')
+        .select('*')
+        .eq('course_id', courseId)
+        .order('order_index')
+      modList = mods ?? []
+    }
     setModules(modList)
     const map: Record<string, Lesson[]> = {}
     const ids: string[] = []
