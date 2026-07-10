@@ -17,6 +17,7 @@ export interface Profile {
   employment_status?: string
   account_status?: string
   last_login?: string
+  must_change_password?: boolean
 }
 
 export interface Department {

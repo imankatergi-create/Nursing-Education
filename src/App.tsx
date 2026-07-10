@@ -5,6 +5,7 @@ import type { ModalConfig } from './context/AppContext'
 import type { Profile, Screen } from './types'
 
 import Login from './components/layout/Login'
+import ForceChangePassword from './components/layout/ForceChangePassword'
 import Sidebar from './components/layout/Sidebar'
 import TopBar from './components/layout/TopBar'
 
@@ -127,6 +128,7 @@ export default function App() {
   }
 
   if (!profile) return <Login onLogin={handleLogin} />
+  if (profile.must_change_password) return <ForceChangePassword profile={profile} onDone={setProfile} />
 
   const role = profile.role
 

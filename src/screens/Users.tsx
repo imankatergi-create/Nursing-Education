@@ -37,7 +37,7 @@ export default function UsersScreen() {
 
   function openInvite() {
     openModal({
-      title: 'Invite New User',
+      title: 'Create New User',
       body: (
         <InviteForm
           depts={depts}
@@ -51,7 +51,7 @@ export default function UsersScreen() {
             }
             fetchUsers()
             closeModal()
-            toast(`Invitation sent to ${data.email}`)
+            toast(`User created — share the temporary password with ${data.email}`)
           }}
         />
       ),
@@ -111,7 +111,7 @@ export default function UsersScreen() {
           <h1 className="screen-title">User Management</h1>
           <p className="screen-subtitle">{users.length} registered users</p>
         </div>
-        <button className="btn btn-primary" onClick={openInvite}>+ Invite User</button>
+        <button className="btn btn-primary" onClick={openInvite}>+ Create User</button>
       </div>
 
       <div className="card">
@@ -174,9 +174,17 @@ export default function UsersScreen() {
 }
 
 function InviteForm({ depts, onSave }: { depts: DeptRow[]; onSave: (d: Record<string, string>) => void }) {
-  const [form, setForm] = useState({ email: '', full_name: '', role: 'nurse', employee_id: '', job_title: '', dept_id: '' })
+  const [form, setForm] = useState({ email: '', full_name: '', role: 'nurse', employee_id: '', job_title: '', dept_id: '', temp_password: '' })
+  const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  function generatePassword() {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#!'
+    const pwd = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    set('temp_password', pwd)
+    setShowPwd(true)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -187,8 +195,8 @@ function InviteForm({ depts, onSave }: { depts: DeptRow[]; onSave: (d: Record<st
 
   return (
     <form className="modal-form" onSubmit={handleSubmit}>
-      <div className="invite-notice">
-        A password setup email will be sent to the user after their account is created.
+      <div style={{ background: 'var(--teal-t)', border: '1px solid var(--teal)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--teal)' }}>
+        The user will be required to change their password on first login.
       </div>
       <div className="form-row">
         <div className="form-group"><label>Full Name</label><input value={form.full_name} onChange={e => set('full_name', e.target.value)} required /></div>
@@ -213,8 +221,34 @@ function InviteForm({ depts, onSave }: { depts: DeptRow[]; onSave: (d: Record<st
         <div className="form-group"><label>Employee ID</label><input value={form.employee_id} onChange={e => set('employee_id', e.target.value)} /></div>
         <div className="form-group"><label>Job Title</label><input value={form.job_title} onChange={e => set('job_title', e.target.value)} /></div>
       </div>
+      <div className="form-group">
+        <label>Temporary Password</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            type={showPwd ? 'text' : 'password'}
+            value={form.temp_password}
+            onChange={e => set('temp_password', e.target.value)}
+            placeholder="Min 8 characters"
+            required
+            style={{ flex: 1 }}
+          />
+          <button type="button" className="btn btn-sm btn-outline" onClick={() => setShowPwd(v => !v)} style={{ whiteSpace: 'nowrap' }}>
+            {showPwd ? 'Hide' : 'Show'}
+          </button>
+          <button type="button" className="btn btn-sm" onClick={generatePassword} style={{ whiteSpace: 'nowrap' }}>
+            Generate
+          </button>
+        </div>
+        {form.temp_password && showPwd && (
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted)' }}>
+            Share this with the user: <strong style={{ fontFamily: 'monospace', color: 'var(--ink)' }}>{form.temp_password}</strong>
+          </div>
+        )}
+      </div>
       <div className="modal-form-actions">
-        <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? 'Sending Invite…' : 'Send Invitation'}</button>
+        <button type="submit" className="btn btn-primary" disabled={loading || form.temp_password.length < 8}>
+          {loading ? 'Creating…' : 'Create User'}
+        </button>
       </div>
     </form>
   )
