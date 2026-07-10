@@ -8,6 +8,8 @@ interface LessonMaterialRow extends Material {
   _duration: string
 }
 
+interface MatConfig { watch_pct: number; duration_text: string }
+
 export default function SyllabusScreen() {
   const { params, toast, openModal, closeModal } = useApp()
   const [courses, setCourses] = useState<Course[]>([])
@@ -56,6 +58,22 @@ export default function SyllabusScreen() {
     setLoading(false)
   }
 
+  async function saveLessonMaterials(lessonId: string, configs: Record<string, MatConfig>) {
+    await supabase.from('lesson_materials').delete().eq('lesson_id', lessonId)
+    const entries = Object.entries(configs)
+    if (entries.length > 0) {
+      await supabase.from('lesson_materials').insert(
+        entries.map(([mid, cfg], i) => ({
+          lesson_id: lessonId,
+          material_id: mid,
+          order_index: i,
+          required_watch_pct: cfg.watch_pct,
+          duration_text: cfg.duration_text,
+        }))
+      )
+    }
+  }
+
   async function deleteModule(mod: CourseModule) {
     if (!confirm(`Delete module "${mod.title}" and all its lessons?`)) return
     await supabase.from('course_modules').delete().eq('id', mod.id)
@@ -93,10 +111,15 @@ export default function SyllabusScreen() {
 
   function openAddLesson(moduleId: string) {
     openModal({
-      title: 'Add Lesson',
-      body: <LessonForm onSave={async d => {
+      title: 'Add Lesson', wide: true,
+      body: <LessonForm onSave={async (d, matConfigs) => {
         const count = (lessons[moduleId] ?? []).length
-        await supabase.from('lessons').insert({ ...d, module_id: moduleId, order_index: count + 1 })
+        const { data: created } = await supabase
+          .from('lessons')
+          .insert({ ...d, module_id: moduleId, order_index: count + 1 })
+          .select('id')
+          .maybeSingle()
+        if (created?.id) await saveLessonMaterials(created.id, matConfigs)
         if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson added')
       }} />,
     })
@@ -104,21 +127,12 @@ export default function SyllabusScreen() {
 
   function openEditLesson(lesson: Lesson) {
     openModal({
-      title: 'Edit Lesson',
-      body: <LessonForm initial={lesson} onSave={async d => {
+      title: 'Edit Lesson', wide: true,
+      body: <LessonForm initial={lesson} onSave={async (d, matConfigs) => {
         await supabase.from('lessons').update(d).eq('id', lesson.id)
+        await saveLessonMaterials(lesson.id, matConfigs)
         if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson updated')
       }} />,
-    })
-  }
-
-  function openAttachMaterials(lesson: Lesson) {
-    openModal({
-      title: `Materials — ${lesson.title}`, wide: true,
-      body: <MaterialPicker
-        lessonId={lesson.id}
-        onDone={() => { if (selectedCourse) loadCourse(selectedCourse); closeModal() }}
-      />,
     })
   }
 
@@ -184,13 +198,6 @@ export default function SyllabusScreen() {
                     </div>
                     <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
                       <span className={`badge badge-${typeColor[lesson.type] ?? 'gray'}`}>{lesson.type}</span>
-                      <button
-                        className="btn btn-sm btn-outline"
-                        onClick={() => openAttachMaterials(lesson)}
-                        title="Attach materials"
-                      >
-                        📎{(lessonMaterials[lesson.id] ?? []).length > 0 ? ` ${(lessonMaterials[lesson.id] ?? []).length}` : ''}
-                      </button>
                       <button className="btn btn-sm btn-outline" onClick={() => openEditLesson(lesson)}>Edit</button>
                       <button className="btn btn-sm btn-danger" onClick={() => deleteLesson(lesson)}>Del</button>
                     </div>
@@ -209,160 +216,167 @@ function ModuleForm({ initial, onSave }: { initial?: CourseModule; onSave: (d: {
   const [title, setTitle] = useState(initial?.title ?? '')
   return (
     <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave({ title }) }}>
-      <div className="form-group"><label>Module Title</label><input value={title} onChange={e => setTitle(e.target.value)} required /></div>
+      <div className="form-group"><label>Module Title</label><input value={title} onChange={e => setTitle(e.target.value)} required autoFocus /></div>
       <div className="modal-form-actions"><button type="submit" className="btn btn-primary">{initial ? 'Save' : 'Add'}</button></div>
     </form>
   )
 }
 
-function LessonForm({ initial, onSave }: { initial?: Lesson; onSave: (d: Partial<Lesson>) => void }) {
+function LessonForm({
+  initial,
+  onSave,
+}: {
+  initial?: Lesson
+  onSave: (d: Partial<Lesson>, materials: Record<string, MatConfig>) => void
+}) {
   const [quizzes, setQuizzes] = useState<{ id: string; title: string }[]>([])
-  const [form, setForm] = useState<{ title: string; type: 'video'|'doc'|'quiz'|'eval'; duration_text: string; requirement: string; quiz_id: string }>({
+  const [allMaterials, setAllMaterials] = useState<Material[]>([])
+  const [matConfigs, setMatConfigs] = useState<Record<string, MatConfig>>({})
+  const [loadingMats, setLoadingMats] = useState(true)
+  const [form, setForm] = useState<{
+    title: string
+    type: 'video' | 'doc' | 'quiz' | 'eval'
+    duration_text: string
+    requirement: string
+    quiz_id: string
+  }>({
     title: initial?.title ?? '',
-    type: (initial?.type ?? 'video') as 'video'|'doc'|'quiz'|'eval',
+    type: (initial?.type ?? 'video') as 'video' | 'doc' | 'quiz' | 'eval',
     duration_text: initial?.duration_text ?? '',
     requirement: initial?.requirement ?? '',
     quiz_id: (initial as any)?.quiz_id ?? '',
   })
 
   useEffect(() => {
-    supabase.from('quizzes').select('id, title').order('title').then(({ data }) => setQuizzes(data ?? []))
-  }, [])
-
-  return (
-    <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave(form) }}>
-      <div className="form-group"><label>Title</label><input value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))} required /></div>
-      <div className="form-row">
-        <div className="form-group"><label>Type</label>
-          <select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value as 'video'|'doc'|'quiz'|'eval'}))}>
-            <option value="video">Video</option><option value="doc">Document</option><option value="quiz">Quiz</option><option value="eval">Evaluation</option>
-          </select>
-        </div>
-        <div className="form-group"><label>Duration</label><input value={form.duration_text} onChange={e => setForm(f => ({...f, duration_text: e.target.value}))} placeholder="e.g. 15 min" /></div>
-      </div>
-      {form.type === 'quiz' && (
-        <div className="form-group"><label>Link Quiz</label>
-          <select value={form.quiz_id} onChange={e => setForm(f => ({...f, quiz_id: e.target.value}))}>
-            <option value="">— Select a quiz —</option>
-            {quizzes.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
-          </select>
-        </div>
-      )}
-      <div className="form-group"><label>Requirement</label><input value={form.requirement} onChange={e => setForm(f => ({...f, requirement: e.target.value}))} placeholder="e.g. Watch 90%, Score ≥80%" /></div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">{initial ? 'Save Changes' : 'Add Lesson'}</button></div>
-    </form>
-  )
-}
-
-interface MatConfig { watch_pct: number; duration_text: string }
-
-function MaterialPicker({ lessonId, onDone }: { lessonId: string; onDone: () => void }) {
-  const [allMaterials, setAllMaterials] = useState<Material[]>([])
-  const [configs, setConfigs] = useState<Record<string, MatConfig>>({})
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
     ;(async () => {
-      const [{ data: mats }, { data: existing }] = await Promise.all([
+      const [{ data: q }, { data: m }, existingRes] = await Promise.all([
+        supabase.from('quizzes').select('id, title').order('title'),
         supabase.from('materials').select('*').order('title'),
-        supabase.from('lesson_materials')
-          .select('material_id, required_watch_pct, duration_text')
-          .eq('lesson_id', lessonId),
+        initial?.id
+          ? supabase.from('lesson_materials').select('material_id, required_watch_pct, duration_text').eq('lesson_id', initial.id)
+          : Promise.resolve({ data: [] }),
       ])
-      setAllMaterials(mats ?? [])
+      setQuizzes(q ?? [])
+      setAllMaterials(m ?? [])
       const map: Record<string, MatConfig> = {}
-      for (const e of (existing ?? [])) {
+      for (const e of (existingRes.data ?? [])) {
         map[e.material_id] = { watch_pct: e.required_watch_pct ?? 100, duration_text: e.duration_text ?? '' }
       }
-      setConfigs(map)
-      setLoading(false)
+      setMatConfigs(map)
+      setLoadingMats(false)
     })()
-  }, [lessonId])
+  }, [])
 
-  function toggle(id: string) {
-    setConfigs(c => {
+  function toggleMat(id: string) {
+    setMatConfigs(c => {
       const n = { ...c }
       if (n[id]) { delete n[id] } else { n[id] = { watch_pct: 100, duration_text: '' } }
       return n
     })
   }
 
-  function updateConfig(id: string, field: keyof MatConfig, value: string | number) {
-    setConfigs(c => ({ ...c, [id]: { ...c[id], [field]: value } }))
-  }
-
-  async function save() {
-    setSaving(true)
-    await supabase.from('lesson_materials').delete().eq('lesson_id', lessonId)
-    const entries = Object.entries(configs)
-    if (entries.length > 0) {
-      await supabase.from('lesson_materials').insert(
-        entries.map(([mid, cfg], i) => ({
-          lesson_id: lessonId,
-          material_id: mid,
-          order_index: i,
-          required_watch_pct: cfg.watch_pct,
-          duration_text: cfg.duration_text,
-        }))
-      )
-    }
-    setSaving(false)
-    onDone()
+  function updateMatConfig(id: string, field: keyof MatConfig, value: string | number) {
+    setMatConfigs(c => ({ ...c, [id]: { ...c[id], [field]: value } }))
   }
 
   const typeIcon: Record<string, string> = { PDF: '📄', Video: '🎬', PPT: '📊', Checklist: '✅', Protocol: '📋', 'Link/URL': '🔗', Image: '🖼️', Audio: '🎵' }
-  const selectedIds = new Set(Object.keys(configs))
-
-  if (loading) return <div className="loading-state">Loading materials…</div>
+  const selectedIds = new Set(Object.keys(matConfigs))
 
   return (
-    <div>
-      <p style={{ color: 'var(--muted)', marginBottom: 12, fontSize: 13 }}>
-        Select materials and configure the required watch percentage and duration for each.
-      </p>
-      {allMaterials.length === 0 ? (
-        <div className="empty-state">No materials in library yet. Upload materials first.</div>
+    <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave(form, matConfigs) }}>
+      <div className="form-group">
+        <label>Title</label>
+        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required autoFocus />
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Type</label>
+          <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as 'video' | 'doc' | 'quiz' | 'eval' }))}>
+            <option value="video">Video</option>
+            <option value="doc">Document</option>
+            <option value="quiz">Quiz</option>
+            <option value="eval">Evaluation</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Duration</label>
+          <input value={form.duration_text} onChange={e => setForm(f => ({ ...f, duration_text: e.target.value }))} placeholder="e.g. 15 min" />
+        </div>
+      </div>
+      {form.type === 'quiz' && (
+        <div className="form-group">
+          <label>Link Quiz</label>
+          <select value={form.quiz_id} onChange={e => setForm(f => ({ ...f, quiz_id: e.target.value }))}>
+            <option value="">— Select a quiz —</option>
+            {quizzes.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="form-group">
+        <label>Requirement</label>
+        <input value={form.requirement} onChange={e => setForm(f => ({ ...f, requirement: e.target.value }))} placeholder="e.g. Watch 90%, Score ≥80%" />
+      </div>
+
+      {/* ── Materials ─────────────────────────────────────── */}
+      <div className="form-section-title" style={{ marginTop: 16 }}>
+        Attach Materials
+        <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12, marginLeft: 6 }}>— optional</span>
+      </div>
+
+      {loadingMats ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13, padding: '8px 0' }}>Loading materials…</div>
+      ) : allMaterials.length === 0 ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13, padding: '8px 0' }}>
+          No materials in library yet. Upload materials first from the Materials screen.
+        </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto', marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
           {allMaterials.map(m => {
             const sel = selectedIds.has(m.id)
-            const cfg = configs[m.id] ?? { watch_pct: 100, duration_text: '' }
+            const cfg = matConfigs[m.id] ?? { watch_pct: 100, duration_text: '' }
             return (
-              <div key={m.id} style={{
-                border: `1.5px solid ${sel ? 'var(--primary)' : 'var(--border)'}`,
-                borderRadius: 8, overflow: 'hidden',
-                background: sel ? 'color-mix(in srgb, var(--primary) 5%, transparent)' : '',
-                transition: 'border-color 0.15s',
-              }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={sel} onChange={() => toggle(m.id)} />
-                  <span style={{ fontSize: 18 }}>{typeIcon[m.type] ?? '📎'}</span>
+              <div
+                key={m.id}
+                style={{
+                  border: `1.5px solid ${sel ? 'var(--primary)' : 'var(--border)'}`,
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  background: sel ? 'color-mix(in srgb, var(--primary) 5%, transparent)' : 'var(--surface)',
+                  transition: 'border-color 0.15s',
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={sel} onChange={() => toggleMat(m.id)} />
+                  <span style={{ fontSize: 16 }}>{typeIcon[m.type] ?? '📎'}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title}</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{m.type}{m.size_text ? ` · ${m.size_text}` : ''}</div>
+                    <div style={{ fontWeight: 500, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{m.type}{m.size_text ? ` · ${m.size_text}` : ''}</div>
                   </div>
-                  {sel && <span className="badge badge-blue">Selected</span>}
+                  {sel && <span className="badge badge-blue" style={{ fontSize: 11 }}>Selected</span>}
                 </label>
                 {sel && (
-                  <div style={{ display: 'flex', gap: 12, padding: '0 12px 12px', background: 'var(--bg)' }}>
+                  <div style={{ display: 'flex', gap: 12, padding: '0 12px 10px', background: 'var(--bg)' }}>
                     <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginBottom: 4 }}>Required Watch %</label>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Required Watch %
+                      </label>
                       <input
                         type="number" min={0} max={100}
                         value={cfg.watch_pct}
-                        onChange={e => updateConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                        style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+                        onChange={e => updateMatConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                        style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
                       />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginBottom: 4 }}>Duration</label>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Duration
+                      </label>
                       <input
                         type="text"
                         value={cfg.duration_text}
                         placeholder="e.g. 10 min"
-                        onChange={e => updateConfig(m.id, 'duration_text', e.target.value)}
-                        style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+                        onChange={e => updateMatConfig(m.id, 'duration_text', e.target.value)}
+                        style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
                       />
                     </div>
                   </div>
@@ -372,14 +386,15 @@ function MaterialPicker({ lessonId, onDone }: { lessonId: string; onDone: () => 
           })}
         </div>
       )}
-      <div className="modal-form-actions">
-        <span style={{ color: 'var(--muted)', fontSize: 13, marginRight: 'auto' }}>
-          {selectedIds.size} material{selectedIds.size !== 1 ? 's' : ''} selected
-        </span>
-        <button className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Materials'}
-        </button>
+
+      <div className="modal-form-actions" style={{ marginTop: 16 }}>
+        {selectedIds.size > 0 && (
+          <span style={{ color: 'var(--muted)', fontSize: 13, marginRight: 'auto' }}>
+            {selectedIds.size} material{selectedIds.size !== 1 ? 's' : ''} selected
+          </span>
+        )}
+        <button type="submit" className="btn btn-primary">{initial ? 'Save Changes' : 'Add Lesson'}</button>
       </div>
-    </div>
+    </form>
   )
 }
