@@ -1,1 +1,0 @@
-ALTER TABLE lessons ADD COLUMN IF NOT EXISTS material_id uuid REFERENCES materials(id) ON DELETE SET NULL;

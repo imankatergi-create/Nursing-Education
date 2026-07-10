@@ -1,164 +1,72 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
+import { COURSES } from '../../data/constants'
 
 const STATUSES = ['all', 'in-progress', 'not-started', 'completed', 'overdue']
+const TOTAL_DEMO_LESSONS = 6
 
-interface EnrolledCourse {
-  enrollId: string
-  courseId: string
-  title: string
-  code: string
-  category: string
-  duration: string
-  level: string
-  thumbnail_icon: string
-  mandatory: boolean
-  enrollStatus: string  // from nurse_enrollments
-  completionPct: number // from lesson_progress calculation
-  dueDate: string | null
-  totalLessons: number
-  doneLessons: number
-}
+const FALLBACK_STATUSES = ['in-progress', 'not-started', 'completed', 'overdue', 'in-progress', 'not-started']
+const FALLBACK_PCTS = [65, 0, 100, 20, 40, 0]
 
-const thumbColors = ['#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0284c7']
-const statusColor: Record<string, string> = {
-  completed: 'badge-green', 'in-progress': 'badge-blue',
-  'not-started': 'badge-gray', overdue: 'badge-red',
+interface CourseProgress {
+  done: number
+  total: number
 }
 
 export default function NurseCourses() {
   const { navigate, profile } = useApp()
-  const [courses, setCourses] = useState<EnrolledCourse[]>([])
-  const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
+  const [courseProgressMap, setCourseProgressMap] = useState<Record<string, CourseProgress>>({})
 
   useEffect(() => {
-    if (profile?.id) loadCourses()
+    if (!profile?.id) return
+    loadProgress()
   }, [profile?.id])
 
-  async function loadCourses() {
-    setLoading(true)
-
-    // Load nurse's enrollments with course details
-    const { data: enrollments } = await supabase
-      .from('nurse_enrollments')
-      .select('id,course_id,status,completion_pct,due_date,mandatory,courses(id,title,code,category,duration,level,thumbnail_icon,thumbnail_color,mandatory,syllabus_id)')
-      .eq('profile_id', profile!.id)
-
-    if (!enrollments || enrollments.length === 0) {
-      setCourses([])
-      setLoading(false)
-      return
-    }
-
-    const courseIds = enrollments.map(e => e.course_id)
-
-    // For each enrolled course, resolve whether it uses a syllabus_id or course_id for its modules
-    type CourseRow = { id: string; title: string; code: string; category: string; duration: string; level: string; thumbnail_icon: string; thumbnail_color: string; mandatory: boolean; syllabus_id?: string | null }
-    const courseRows = enrollments.map(e => e.courses as unknown as CourseRow | null)
-
-    // Collect syllabus IDs that are in use
-    const syllabusIds = courseRows.flatMap(c => (c?.syllabus_id ? [c.syllabus_id] : []))
-
-    // Count lessons per course_id (for courses without a syllabus)
-    const courseIdsWithoutSyllabus = enrollments
-      .filter((_, i) => !courseRows[i]?.syllabus_id)
-      .map(e => e.course_id)
-
-    // Count lessons per syllabus_id (for courses with a syllabus)
-    const [lessonsByCourse, lessonsBySyllabus] = await Promise.all([
-      courseIdsWithoutSyllabus.length > 0
-        ? supabase.from('lessons').select('module_id, course_modules!inner(course_id)').in('course_modules.course_id', courseIdsWithoutSyllabus)
-        : Promise.resolve({ data: [] }),
-      syllabusIds.length > 0
-        ? supabase.from('lessons').select('module_id, course_modules!inner(syllabus_id)').in('course_modules.syllabus_id', syllabusIds)
-        : Promise.resolve({ data: [] }),
-    ])
-
-    const totalByCourseId: Record<string, number> = {}
-    for (const l of lessonsByCourse.data ?? []) {
-      const courseId = (l.course_modules as unknown as { course_id: string }).course_id
-      totalByCourseId[courseId] = (totalByCourseId[courseId] ?? 0) + 1
-    }
-    const totalBySyllabusId: Record<string, number> = {}
-    for (const l of lessonsBySyllabus.data ?? []) {
-      const sId = (l.course_modules as unknown as { syllabus_id: string }).syllabus_id
-      totalBySyllabusId[sId] = (totalBySyllabusId[sId] ?? 0) + 1
-    }
-
-    // Count completed lessons per course from lesson_progress
-    const { data: progress } = await supabase
+  async function loadProgress() {
+    const { data } = await supabase
       .from('lesson_progress')
-      .select('course_key,completed')
+      .select('course_key, completed')
       .eq('profile_id', profile!.id)
-      .in('course_key', courseIds)
+    if (!data || data.length === 0) return
 
-    const doneMap: Record<string, number> = {}
-    for (const p of progress ?? []) {
-      if (p.completed) doneMap[p.course_key] = (doneMap[p.course_key] ?? 0) + 1
+    const map: Record<string, CourseProgress> = {}
+    for (const row of data) {
+      if (!map[row.course_key]) map[row.course_key] = { done: 0, total: 0 }
+      map[row.course_key].total++
+      if (row.completed) map[row.course_key].done++
     }
-
-    const list: EnrolledCourse[] = enrollments.map((e) => {
-      const c = courseRows[enrollments.indexOf(e)]
-      const syllabusId = c?.syllabus_id
-      const total = syllabusId ? (totalBySyllabusId[syllabusId] ?? 0) : (totalByCourseId[e.course_id] ?? 0)
-      const done = doneMap[e.course_id] ?? 0
-      const pct = total > 0 ? Math.round((done / total) * 100) : (e.completion_pct ?? 0)
-
-      // Derive display status from actual progress
-      let displayStatus = e.status ?? 'not_started'
-      if (total > 0) {
-        if (done >= total) displayStatus = 'completed'
-        else if (done > 0) displayStatus = 'in-progress'
-        else displayStatus = 'not-started'
-      } else {
-        // Fall back to enrollment status
-        if (displayStatus === 'completed') displayStatus = 'completed'
-        else if (displayStatus === 'in_progress') displayStatus = 'in-progress'
-        else if (displayStatus === 'overdue') displayStatus = 'overdue'
-        else displayStatus = 'not-started'
-      }
-
-      // Override with overdue if deadline passed and not completed
-      if (e.due_date && new Date(e.due_date) < new Date() && displayStatus !== 'completed') {
-        displayStatus = 'overdue'
-      }
-
-      return {
-        enrollId: e.id,
-        courseId: e.course_id,
-        title: c?.title ?? 'Unknown Course',
-        code: c?.code ?? '',
-        category: c?.category ?? '',
-        duration: c?.duration ?? '',
-        level: c?.level ?? '',
-        thumbnail_icon: c?.thumbnail_icon ?? '📚',
-        mandatory: e.mandatory ?? c?.mandatory ?? false,
-        enrollStatus: displayStatus,
-        completionPct: pct,
-        dueDate: e.due_date ?? null,
-        totalLessons: total,
-        doneLessons: done,
-      }
-    })
-
-    setCourses(list)
-    setLoading(false)
+    setCourseProgressMap(map)
   }
 
-  const filtered = courses.filter(c => {
+  function getCourseStatus(courseId: string, idx: number): string {
+    const p = courseProgressMap[courseId]
+    if (!p) return FALLBACK_STATUSES[idx % FALLBACK_STATUSES.length]
+    const pct = Math.round((p.done / TOTAL_DEMO_LESSONS) * 100)
+    if (pct >= 100) return 'completed'
+    if (pct > 0) return 'in-progress'
+    return 'not-started'
+  }
+
+  function getCoursePct(courseId: string, idx: number): number {
+    const p = courseProgressMap[courseId]
+    if (!p) return FALLBACK_PCTS[idx % FALLBACK_PCTS.length]
+    return Math.round((p.done / TOTAL_DEMO_LESSONS) * 100)
+  }
+
+  const filtered = COURSES.filter((c, i) => {
+    const st = getCourseStatus(c.id, i)
     const q = search.toLowerCase()
-    const matchSearch = !q || c.title.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
-    const matchStatus = status === 'all' || c.enrollStatus === status
-    return matchSearch && matchStatus
+    return (!q || c.title.toLowerCase().includes(q)) && (status === 'all' || st === status)
   })
 
-  const statusCounts = STATUSES.reduce((acc, s) => {
-    acc[s] = s === 'all' ? courses.length : courses.filter(c => c.enrollStatus === s).length
-    return acc
-  }, {} as Record<string, number>)
+  const statusColor: Record<string, string> = {
+    'completed': 'badge-green', 'in-progress': 'badge-blue',
+    'not-started': 'badge-gray', 'overdue': 'badge-red',
+  }
+  const thumbColors = ['#0891b2', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0284c7']
 
   return (
     <div className="screen-container">
@@ -179,77 +87,79 @@ export default function NurseCourses() {
       </div>
 
       <div className="tab-row">
-        {STATUSES.map(s => (
-          <button
-            key={s}
-            className={`tab-btn${status === s ? ' active' : ''}`}
-            onClick={() => setStatus(s)}
-          >
-            {s === 'all' ? 'All' : s.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}
-            <span className="tab-count">{statusCounts[s] ?? 0}</span>
-          </button>
-        ))}
+        {STATUSES.map(s => {
+          const count = s === 'all'
+            ? COURSES.length
+            : COURSES.filter((c, i) => getCourseStatus(c.id, i) === s).length
+          return (
+            <button
+              key={s}
+              className={`tab-btn${status === s ? ' active' : ''}`}
+              onClick={() => setStatus(s)}
+            >
+              {s === 'all' ? 'All' : s.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}
+              <span className="tab-count">{count}</span>
+            </button>
+          )
+        })}
       </div>
 
-      {loading ? (
-        <div className="loading-state">Loading courses…</div>
-      ) : (
-        <div className="nurse-courses-grid">
-          {filtered.map((c, i) => (
+      <div className="nurse-courses-grid">
+        {filtered.map((c, i) => {
+          const courseIdx = COURSES.indexOf(c)
+          const st = getCourseStatus(c.id, courseIdx)
+          const pct = getCoursePct(c.id, courseIdx)
+          return (
             <div
-              key={c.enrollId}
+              key={c.id}
               className="nurse-course-card"
-              onClick={() => navigate('ncourse', { courseId: c.courseId })}
+              onClick={() => navigate('ncourse', { courseId: c.id })}
             >
-              <div className="nurse-course-thumb" style={{ background: thumbColors[i % thumbColors.length] }}>
-                <span>{c.thumbnail_icon}</span>
+              <div
+                className="nurse-course-thumb"
+                style={{ background: thumbColors[i % thumbColors.length] }}
+              >
+                <span>{c.thumbnail_icon || '📚'}</span>
               </div>
               <div className="nurse-course-card-body">
                 <div className="nurse-course-card-top">
                   <span className="course-code">{c.code}</span>
-                  <span className={`badge ${statusColor[c.enrollStatus] ?? 'badge-gray'}`}>
-                    {c.enrollStatus.replace('-', ' ')}
+                  <span className={`badge ${statusColor[st] ?? 'badge-gray'}`}>
+                    {st.replace('-', ' ')}
                   </span>
                 </div>
                 <h3 className="nurse-course-card-title">{c.title}</h3>
                 <div className="nurse-course-card-meta">
-                  {c.duration && <span>⏱ {c.duration}</span>}
-                  {c.level && <span>📊 {c.level}</span>}
-                  {c.dueDate && <span>📅 Due {c.dueDate}</span>}
+                  <span>⏱ {c.duration}</span>
+                  <span>📊 {c.level}</span>
                 </div>
                 <div className="progress-bar-wrap">
                   <div className="bar-track">
                     <div
                       className="bar-fill"
                       style={{
-                        width: `${c.completionPct}%`,
-                        background: c.enrollStatus === 'overdue' ? 'var(--red)'
-                          : c.enrollStatus === 'completed' ? 'var(--green)'
+                        width: `${pct}%`,
+                        background: st === 'overdue' ? 'var(--red)'
+                          : st === 'completed' ? 'var(--green)'
                           : 'var(--teal)',
                       }}
                     />
                   </div>
-                  <span className="progress-pct">
-                    {c.totalLessons > 0
-                      ? `${c.doneLessons}/${c.totalLessons} lessons`
-                      : `${c.completionPct}%`}
-                  </span>
+                  <span className="progress-pct">{pct}%</span>
                 </div>
                 {c.mandatory && (
-                  <span className="tag tag-red" style={{ marginTop: 6, display: 'inline-block' }}>Mandatory</span>
+                  <span className="tag tag-red" style={{ marginTop: 6, display: 'inline-block' }}>
+                    Mandatory
+                  </span>
                 )}
               </div>
             </div>
-          ))}
-          {filtered.length === 0 && !loading && (
-            <div className="empty-state" style={{ gridColumn: '1/-1' }}>
-              {courses.length === 0
-                ? 'No courses assigned yet. Contact your supervisor to get enrolled.'
-                : 'No courses match your filter.'}
-            </div>
-          )}
-        </div>
-      )}
+          )
+        })}
+        {filtered.length === 0 && (
+          <div className="empty-state" style={{ gridColumn: '1/-1' }}>No courses match your filter.</div>
+        )}
+      </div>
     </div>
   )
 }

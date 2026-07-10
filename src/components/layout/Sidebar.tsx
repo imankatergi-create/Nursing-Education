@@ -1,57 +1,52 @@
 import { useApp } from '../../context/AppContext'
 import type { Screen } from '../../types'
 
-interface NavItem { icon: string; label: string; screen: Screen; permission?: string }
+interface NavItem { icon: string; label: string; screen: Screen }
 
-// Every CMS nav item declares which permission controls its visibility.
-// Items with no permission are visible to all non-nurse roles.
 const CMS_NAV: NavItem[] = [
-  { icon: '⊞', label: 'Dashboard',     screen: 'dashboard',     permission: 'View Dashboard' },
-  { icon: '👥', label: 'Users',         screen: 'users',         permission: 'Manage Users' },
-  { icon: '🔑', label: 'Roles',         screen: 'roles',         permission: 'Manage Roles' },
-  { icon: '🏢', label: 'Departments',   screen: 'depts',         permission: 'Manage Departments' },
-  { icon: '📋', label: 'Programs',      screen: 'programs',      permission: 'Create Programs' },
-  { icon: '📚', label: 'Courses',       screen: 'courses',       permission: 'Create Courses' },
-  { icon: '📝', label: 'Syllabus',      screen: 'syllabus',      permission: 'Edit Courses' },
-  { icon: '📎', label: 'Materials',     screen: 'materials',     permission: 'Upload Materials' },
-  { icon: '📊', label: 'Quizzes',       screen: 'quizzes',       permission: 'Create Quizzes' },
-  { icon: '✅', label: 'Assignments',   screen: 'assignments',   permission: 'View Reports' },
-  { icon: '📈', label: 'Progress',      screen: 'progress',      permission: 'View Reports' },
-  { icon: '📉', label: 'Reports',       screen: 'reports',       permission: 'View Reports' },
-  { icon: '🔔', label: 'Notifications', screen: 'notifications', permission: 'Send Notifications' },
-  { icon: '📣', label: 'Announcements', screen: 'announcements', permission: 'Create Announcements' },
-  { icon: '🎓', label: 'Certificates',  screen: 'certificates',  permission: 'View Certificates' },
-  { icon: '💬', label: 'Feedback',      screen: 'feedback',      permission: 'View Reports' },
-  { icon: '🗒️', label: 'Audit Log',     screen: 'audit',         permission: 'View Audit Log' },
-  { icon: '⚙️', label: 'Settings',      screen: 'settings',      permission: 'System Settings' },
-  { icon: '🗺️', label: 'Coverage Map',  screen: 'coverage',      permission: 'View Reports' },
+  { icon: '⊞', label: 'Dashboard', screen: 'dashboard' },
+  { icon: '👥', label: 'Users', screen: 'users' },
+  { icon: '🔑', label: 'Roles', screen: 'roles' },
+  { icon: '🏢', label: 'Departments', screen: 'depts' },
+  { icon: '📋', label: 'Programs', screen: 'programs' },
+  { icon: '📚', label: 'Courses', screen: 'courses' },
+  { icon: '📝', label: 'Syllabus', screen: 'syllabus' },
+  { icon: '📎', label: 'Materials', screen: 'materials' },
+  { icon: '📊', label: 'Quizzes', screen: 'quizzes' },
+  { icon: '✅', label: 'Assignments', screen: 'assignments' },
+  { icon: '📈', label: 'Progress', screen: 'progress' },
+  { icon: '📉', label: 'Reports', screen: 'reports' },
+  { icon: '🔔', label: 'Notifications', screen: 'notifications' },
+  { icon: '📣', label: 'Announcements', screen: 'announcements' },
+  { icon: '🎓', label: 'Certificates', screen: 'certificates' },
+  { icon: '💬', label: 'Feedback', screen: 'feedback' },
+  { icon: '🗒️', label: 'Audit Log', screen: 'audit' },
+  { icon: '⚙️', label: 'Settings', screen: 'settings' },
+  { icon: '🗺️', label: 'Coverage Map', screen: 'coverage' },
 ]
 
 const NURSE_NAV: NavItem[] = [
-  { icon: '⊞', label: 'Dashboard',      screen: 'ndash' },
-  { icon: '📚', label: 'My Courses',     screen: 'ncourses' },
-  { icon: '🎓', label: 'Certificates',   screen: 'ncerts' },
-  { icon: '🔔', label: 'Notifications',  screen: 'nnotifs' },
-  { icon: '🔍', label: 'Search',         screen: 'nsearch' },
+  { icon: '⊞', label: 'Dashboard', screen: 'ndash' },
+  { icon: '📚', label: 'My Courses', screen: 'ncourses' },
+  { icon: '🎓', label: 'Certificates', screen: 'ncerts' },
+  { icon: '🔔', label: 'Notifications', screen: 'nnotifs' },
+  { icon: '🔍', label: 'Search', screen: 'nsearch' },
 ]
 
-// Superadmin always gets everything regardless of stored permissions.
+const ROLE_SCREENS: Record<string, Screen[]> = {
+  nurse: ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'],
+  supervisor: ['dashboard','progress','reports','assignments','announcements','notifications','coverage'],
+  educator: ['dashboard','courses','syllabus','materials','quizzes','programs','assignments','progress','reports','announcements','notifications'],
+  director: ['dashboard','progress','reports','coverage','announcements','certificates','programs'],
+  it: ['dashboard','users','roles','depts','settings','audit','notifications'],
+  admin: ['dashboard','users','roles','depts','programs','courses','syllabus','materials','quizzes','assignments','progress','reports','notifications','announcements','certificates','feedback','audit','settings','coverage','cmssearch'],
+  superadmin: ['dashboard','users','roles','depts','programs','courses','syllabus','materials','quizzes','assignments','progress','reports','notifications','announcements','certificates','feedback','audit','settings','coverage','cmssearch'],
+}
 
 export default function Sidebar({ isNursePortal, open, onClose }: { isNursePortal: boolean; open: boolean; onClose: () => void }) {
-  const { screen, navigate, profile, role, permissions } = useApp()
-
-  let navItems: NavItem[]
-
-  if (isNursePortal || role === 'nurse') {
-    navItems = NURSE_NAV
-  } else if (role === 'superadmin') {
-    navItems = CMS_NAV
-  } else {
-    // Show an item if the user's role has the matching permission in custom_roles.
-    navItems = CMS_NAV.filter(item =>
-      !item.permission || permissions.includes(item.permission)
-    )
-  }
+  const { screen, navigate, profile, role } = useApp()
+  const allowedScreens = ROLE_SCREENS[role] ?? []
+  const navItems = isNursePortal ? NURSE_NAV : CMS_NAV.filter(n => allowedScreens.includes(n.screen))
 
   return (
     <aside className={`sidebar${open ? ' sidebar-open' : ''}`}>

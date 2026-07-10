@@ -33,13 +33,6 @@ export interface Unit {
   supervisor?: string
 }
 
-export interface Syllabus {
-  id: string
-  title: string
-  description: string
-  created_at: string
-}
-
 export interface Course {
   id: string
   title: string
@@ -63,13 +56,11 @@ export interface Course {
   video_filename?: string
   video_size_mb?: number
   video_duration_sec?: number
-  syllabus_id?: string | null
 }
 
 export interface CourseModule {
   id: string
-  course_id: string | null
-  syllabus_id?: string | null
+  course_id: string
   title: string
   order_index: number
 }
@@ -83,11 +74,6 @@ export interface Lesson {
   requirement: string
   locked_note?: string
   order_index: number
-  video_url?: string
-  doc_url?: string
-  doc_filename?: string
-  quiz_id?: string
-  material_id?: string
 }
 
 export interface Program {
@@ -126,11 +112,6 @@ export interface Material {
   views: number
   avg_time?: string
   completion_pct: number
-  file_url?: string
-  duration_text?: string
-  watch_pct_required?: number
-  requires_acknowledgment?: boolean
-  description?: string
 }
 
 export interface MaterialVersion {

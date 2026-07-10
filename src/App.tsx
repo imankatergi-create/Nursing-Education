@@ -38,7 +38,6 @@ import NurseSearch from './screens/nurse/NurseSearch'
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [permissions, setPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [params, setParams] = useState<Record<string, string>>({})
@@ -47,76 +46,24 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Whenever the logged-in user's role changes, reload their permissions from
-  // custom_roles. This runs outside onAuthStateChange so there is no deadlock.
   useEffect(() => {
-    if (!profile?.role) { setPermissions([]); return }
-    supabase
-      .from('custom_roles')
-      .select('permissions')
-      .eq('id', profile.role)
-      .maybeSingle()
-      .then(({ data: roleRow }) => {
-        const perms = roleRow?.permissions
-        setPermissions(Array.isArray(perms) ? perms : [])
-      })
-  }, [profile?.role])
-
-  useEffect(() => {
-    let profileChannel: ReturnType<typeof supabase.channel> | null = null
-
-    function setupRealtimeChannel(uid: string) {
-      if (profileChannel) supabase.removeChannel(profileChannel)
-      profileChannel = supabase
-        .channel(`profile:${uid}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
-          (payload) => {
-            // setProfile triggers the profile.role useEffect which reloads permissions.
-            setProfile(payload.new as Profile)
-          }
-        )
-        .subscribe()
-    }
-
-    // Initial session load — safe to call supabase here (outside the listener).
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        loadProfile(session.user.id)
-        setupRealtimeChannel(session.user.id)
-      } else {
-        setLoading(false)
-      }
+      if (session?.user) loadProfile(session.user.id)
+      else setLoading(false)
     })
 
-    // Subsequent sign-in / sign-out events.
-    // NEVER call supabase.from() directly inside this callback — it causes a
-    // deadlock (Supabase auth lock held). Defer with setTimeout to break out.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setTimeout(() => {
-        if (session?.user) {
-          loadProfile(session.user.id)
-          setupRealtimeChannel(session.user.id)
-        } else {
-          if (profileChannel) { supabase.removeChannel(profileChannel); profileChannel = null }
-          setProfile(null)
-          setPermissions([])
-          setLoading(false)
-        }
-      }, 0)
+      ;(async () => {
+        if (session?.user) await loadProfile(session.user.id)
+        else { setProfile(null); setLoading(false) }
+      })()
     })
-
-    return () => {
-      subscription.unsubscribe()
-      if (profileChannel) supabase.removeChannel(profileChannel)
-    }
+    return () => subscription.unsubscribe()
   }, [])
 
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
-    setScreen(data?.role === 'nurse' ? 'ndash' : 'dashboard')
     setLoading(false)
   }
 
@@ -195,7 +142,7 @@ export default function App() {
   const isNursePortal = ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'].includes(screen)
 
   return (
-    <AppContext.Provider value={{ profile, role, permissions, navigate, screen, params, toast, openModal, closeModal }}>
+    <AppContext.Provider value={{ profile, role, navigate, screen, params, toast, openModal, closeModal }}>
       <div className="app-shell">
         {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <Sidebar isNursePortal={isNursePortal} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />

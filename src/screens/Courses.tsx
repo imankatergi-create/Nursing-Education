@@ -2,20 +2,16 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 import { COURSES } from '../data/constants'
-import type { Course, Syllabus } from '../types'
+import type { Course } from '../types'
 
 export default function CoursesScreen() {
   const { navigate, toast, openModal, closeModal } = useApp()
   const [courses, setCourses] = useState<Course[]>([])
-  const [syllabi, setSyllabi] = useState<Syllabus[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('all')
 
-  useEffect(() => {
-    fetchCourses()
-    supabase.from('syllabi').select('id,title').order('title').then(({ data }) => setSyllabi((data ?? []) as Syllabus[]))
-  }, [])
+  useEffect(() => { fetchCourses() }, [])
 
   async function fetchCourses() {
     setLoading(true)
@@ -40,21 +36,34 @@ export default function CoursesScreen() {
   function openAdd() {
     openModal({
       title: 'Create Course', wide: true,
-      body: <CourseForm syllabi={syllabi} onSave={async d => { await supabase.from('courses').insert(d); fetchCourses(); closeModal(); toast('Course created') }} />,
+      body: (
+        <CourseForm
+          onSave={async d => {
+            await supabase.from('courses').insert(d)
+            fetchCourses()
+            closeModal()
+            toast('Course created')
+          }}
+        />
+      ),
     })
   }
 
   function openEdit(course: Course) {
     openModal({
       title: 'Edit Course', wide: true,
-      body: <CourseForm syllabi={syllabi} initial={course} onSave={async d => { await supabase.from('courses').update(d).eq('id', course.id); fetchCourses(); closeModal(); toast('Course saved') }} />,
+      body: (
+        <CourseForm
+          initial={course}
+          onSave={async d => {
+            await supabase.from('courses').update(d).eq('id', course.id)
+            fetchCourses()
+            closeModal()
+            toast('Course saved')
+          }}
+        />
+      ),
     })
-  }
-
-  async function linkSyllabus(course: Course, syllabusId: string | null) {
-    await supabase.from('courses').update({ syllabus_id: syllabusId }).eq('id', course.id)
-    fetchCourses()
-    toast(syllabusId ? 'Syllabus linked to course' : 'Syllabus unlinked')
   }
 
   async function deleteCourse(course: Course) {
@@ -75,7 +84,12 @@ export default function CoursesScreen() {
       </div>
 
       <div className="table-toolbar">
-        <input className="search-input" placeholder="Search courses…" value={search} onChange={e => setSearch(e.target.value)} />
+        <input
+          className="search-input"
+          placeholder="Search courses…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
         <div className="filter-chips">
           {cats.map(c => (
             <button key={c} className={`chip${catFilter === c ? ' active' : ''}`} onClick={() => setCatFilter(c)}>
@@ -86,95 +100,46 @@ export default function CoursesScreen() {
       </div>
 
       <div className="courses-grid">
-        {loading ? <div className="loading-state">Loading…</div>
-          : filtered.map((c, i) => {
-            const linkedSyllabus = syllabi.find(s => s.id === c.syllabus_id)
-            return (
-              <div key={c.id} className="course-card">
-                <div className="course-thumb" style={{ background: iconColors[i % iconColors.length] }}>
-                  <span className="course-thumb-icon">{c.thumbnail_icon || '📚'}</span>
-                  {c.video_url && <span className="course-video-badge">▶ Video</span>}
-                </div>
-                <div className="course-card-body">
-                  <div className="course-card-top">
-                    <span className="course-code">{c.code}</span>
-                    <span className={`badge ${statusColor[c.status] ?? 'badge-gray'}`}>{c.status}</span>
-                  </div>
-                  <h3 className="course-card-title">{c.title}</h3>
-                  <div className="course-card-meta">
-                    <span>⏱ {c.duration}</span>
-                    <span>📊 {c.level}</span>
-                    <span>🌐 {c.lang}</span>
-                  </div>
-
-                  {/* Syllabus link indicator */}
-                  <div className="course-syllabus-link">
-                    {linkedSyllabus ? (
-                      <span className="course-syllabus-badge">
-                        📋 {linkedSyllabus.title}
-                        <button
-                          className="course-syllabus-unlink"
-                          title="Unlink syllabus"
-                          onClick={e => { e.stopPropagation(); linkSyllabus(c, null) }}
-                        >✕</button>
-                      </span>
-                    ) : (
-                      <span className="course-syllabus-empty">No syllabus linked</span>
-                    )}
-                  </div>
-
-                  {c.mandatory && <span className="tag tag-red" style={{ marginTop: 4 }}>Mandatory</span>}
-
-                  <div className="course-card-actions">
-                    <button className="btn btn-sm btn-outline" onClick={() => openEdit(c)}>Edit</button>
-                    <LinkSyllabusButton course={c} syllabi={syllabi} onLink={sid => linkSyllabus(c, sid)} />
-                    <button className="btn btn-sm" onClick={() => navigate('syllabus')}>Syllabi</button>
-                    <button
-                      className="btn btn-sm btn-outline"
-                      onClick={() => openModal({ title: c.title, wide: true, body: <CourseDetail course={c} linkedSyllabus={linkedSyllabus} /> })}
-                    >
-                      Details
-                    </button>
-                    <button className="btn btn-sm btn-danger" onClick={() => deleteCourse(c)}>Delete</button>
-                  </div>
-                </div>
+        {loading ? (
+          <div className="loading-state">Loading…</div>
+        ) : filtered.map((c, i) => (
+          <div key={c.id} className="course-card">
+            <div className="course-thumb" style={{ background: iconColors[i % iconColors.length] }}>
+              <span className="course-thumb-icon">{c.thumbnail_icon || '📚'}</span>
+              {c.video_url && <span className="course-video-badge">▶ Video</span>}
+            </div>
+            <div className="course-card-body">
+              <div className="course-card-top">
+                <span className="course-code">{c.code}</span>
+                <span className={`badge ${statusColor[c.status] ?? 'badge-gray'}`}>{c.status}</span>
               </div>
-            )
-          })}
+              <h3 className="course-card-title">{c.title}</h3>
+              <div className="course-card-meta">
+                <span>⏱ {c.duration}</span>
+                <span>📊 {c.level}</span>
+                <span>🌐 {c.lang}</span>
+              </div>
+              {c.mandatory && <span className="tag tag-red" style={{ marginTop: 4 }}>Mandatory</span>}
+              <div className="course-card-actions">
+                <button className="btn btn-sm" onClick={() => navigate('syllabus', { courseId: c.id })}>Syllabus</button>
+                <button className="btn btn-sm btn-outline" onClick={() => openEdit(c)}>Edit</button>
+                <button
+                  className="btn btn-sm btn-outline"
+                  onClick={() => openModal({ title: c.title, wide: true, body: <CourseDetail course={c} /> })}
+                >
+                  Details
+                </button>
+                <button className="btn btn-sm btn-danger" onClick={() => deleteCourse(c)}>Delete</button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-// ── LinkSyllabusButton ────────────────────────────────────────────────────────
-
-function LinkSyllabusButton({ course, syllabi, onLink }: { course: Course; syllabi: Syllabus[]; onLink: (id: string) => void }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ position: 'relative' }}>
-      <button className="btn btn-sm btn-primary" onClick={() => setOpen(o => !o)}>
-        📋 Link Syllabus
-      </button>
-      {open && (
-        <div className="syllabus-dropdown" onBlur={() => setOpen(false)}>
-          {syllabi.length === 0 ? (
-            <div style={{ padding: '10px 12px', fontSize: 13, color: 'var(--muted)' }}>No syllabi yet. Create one first.</div>
-          ) : syllabi.map(s => (
-            <button
-              key={s.id}
-              className={`syllabus-dropdown-item${course.syllabus_id === s.id ? ' active' : ''}`}
-              onClick={() => { onLink(s.id); setOpen(false) }}
-            >
-              {course.syllabus_id === s.id ? '✓ ' : ''}{s.title}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function CourseDetail({ course, linkedSyllabus }: { course: Course; linkedSyllabus?: Syllabus }) {
+function CourseDetail({ course }: { course: Course }) {
   return (
     <div className="course-detail">
       <div className="detail-row"><strong>Instructor:</strong> {course.instructor}</div>
@@ -183,14 +148,12 @@ function CourseDetail({ course, linkedSyllabus }: { course: Course; linkedSyllab
       <div className="detail-row"><strong>Duration:</strong> {course.duration}</div>
       <div className="detail-row"><strong>Pass Rule:</strong> {course.pass_rule}</div>
       <div className="detail-row"><strong>Deadline:</strong> {course.deadline}</div>
-      <div className="detail-row">
-        <strong>Linked Syllabus:</strong>{' '}
-        {linkedSyllabus ? <span style={{ color: 'var(--teal)' }}>📋 {linkedSyllabus.title}</span> : <span style={{ color: 'var(--muted)' }}>None</span>}
-      </div>
       {course.video_url && (
         <div className="detail-row">
           <strong>Video:</strong>{' '}
-          <a href={course.video_url} target="_blank" rel="noreferrer" className="link">{course.video_filename ?? 'Watch video'}</a>
+          <a href={course.video_url} target="_blank" rel="noreferrer" className="link">
+            {course.video_filename ?? 'Watch video'}
+          </a>
           {course.video_size_mb && <span style={{ color: 'var(--muted)', marginLeft: 8 }}>({course.video_size_mb} MB)</span>}
         </div>
       )}
@@ -204,13 +167,12 @@ function CourseDetail({ course, linkedSyllabus }: { course: Course; linkedSyllab
   )
 }
 
-function CourseForm({ initial, syllabi, onSave }: { initial?: Partial<Course>; syllabi: Syllabus[]; onSave: (d: Partial<Course>) => void }) {
+function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d: Partial<Course>) => void }) {
   const [form, setForm] = useState({
     title: '', code: '', category: 'Clinical', audience: 'All Nurses', duration: '2h', level: 'Beginner',
     lang: 'English', instructor: '', prerequisites: 'None', mandatory: false, status: 'draft',
     pass_rule: '80%', deadline: '',
     video_url: '', video_filename: '', video_size_mb: 0, video_duration_sec: 0,
-    syllabus_id: '' as string | null,
     ...initial,
   })
   const [videoFile, setVideoFile] = useState<File | null>(null)
@@ -221,31 +183,64 @@ function CourseForm({ initial, syllabi, onSave }: { initial?: Partial<Course>; s
 
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
 
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setVideoFile(file)
+    setUploadError('')
+  }
+
   function removeVideo() {
-    setVideoFile(null); set('video_url', ''); set('video_filename', ''); set('video_size_mb', 0)
+    setVideoFile(null)
+    set('video_url', '')
+    set('video_filename', '')
+    set('video_size_mb', 0)
     if (fileRef.current) fileRef.current.value = ''
   }
 
   async function uploadVideo(): Promise<string | null> {
     if (!videoFile) return form.video_url || null
-    setUploading(true); setUploadProgress(0); setUploadError('')
+
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadError('')
+
+    // Use a sanitized filename with timestamp to avoid collisions
     const safeName = `${Date.now()}-${videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const { error } = await supabase.storage.from('course-videos').upload(`courses/${safeName}`, videoFile, { upsert: true })
-    if (error) { setUploadError(`Upload failed: ${error.message}`); setUploading(false); return null }
-    const { data: { publicUrl } } = supabase.storage.from('course-videos').getPublicUrl(`courses/${safeName}`)
-    setUploadProgress(100); setUploading(false)
+    const path = `courses/${safeName}`
+
+    const { error } = await supabase.storage
+      .from('course-videos')
+      .upload(path, videoFile, { upsert: true })
+
+    if (error) {
+      setUploadError(`Upload failed: ${error.message}`)
+      setUploading(false)
+      return null
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from('course-videos').getPublicUrl(path)
+    setUploadProgress(100)
+    setUploading(false)
     return publicUrl
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    let videoUrl = form.video_url, videoFilename = form.video_filename, videoSizeMb = form.video_size_mb
+
+    let videoUrl = form.video_url
+    let videoFilename = form.video_filename
+    let videoSizeMb = form.video_size_mb
+
     if (videoFile) {
       const url = await uploadVideo()
-      if (!url) return
-      videoUrl = url; videoFilename = videoFile.name; videoSizeMb = parseFloat((videoFile.size / 1024 / 1024).toFixed(2))
+      if (!url) return  // upload failed, error already shown
+      videoUrl = url
+      videoFilename = videoFile.name
+      videoSizeMb = parseFloat((videoFile.size / 1024 / 1024).toFixed(2))
     }
-    onSave({ ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb, syllabus_id: form.syllabus_id || null })
+
+    onSave({ ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb })
   }
 
   const hasExistingVideo = !videoFile && form.video_url
@@ -282,18 +277,8 @@ function CourseForm({ initial, syllabi, onSave }: { initial?: Partial<Course>; s
         <div className="form-group"><label>Pass Rule</label><input value={form.pass_rule} onChange={e => set('pass_rule', e.target.value)} /></div>
       </div>
 
-      {/* Syllabus link */}
-      <div className="form-group">
-        <label>Linked Syllabus</label>
-        <select value={form.syllabus_id ?? ''} onChange={e => set('syllabus_id', e.target.value || null)}>
-          <option value="">— No syllabus linked —</option>
-          {syllabi.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
-        </select>
-        <span className="form-hint">Nurses will see the lessons from this syllabus when they open the course.</span>
-      </div>
-
-      {/* Video Upload */}
-      <div className="form-section-title">Course Video (optional)</div>
+      {/* ── Video Upload ─────────────────────────────────────────── */}
+      <div className="form-section-title">Course Video</div>
       <div className="video-upload-area">
         {hasExistingVideo ? (
           <div className="video-upload-existing">
@@ -321,15 +306,32 @@ function CourseForm({ initial, syllabi, onSave }: { initial?: Partial<Course>; s
             <span className="video-upload-drop-icon">📹</span>
             <span className="video-upload-drop-text">Click to upload a video</span>
             <span className="video-upload-drop-hint">MP4, WebM, MOV — up to 500 MB</span>
-            <input id="video-file-input" ref={fileRef} type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo" onChange={e => { setVideoFile(e.target.files?.[0] ?? null); setUploadError('') }} style={{ display: 'none' }} />
+            <input
+              id="video-file-input"
+              ref={fileRef}
+              type="file"
+              accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
           </label>
         )}
-        {uploading && <div className="video-upload-progress"><div className="bar-track"><div className="bar-fill" style={{ width: `${uploadProgress}%`, transition: 'width 0.3s' }} /></div><span>Uploading… {uploadProgress}%</span></div>}
+
+        {uploading && (
+          <div className="video-upload-progress">
+            <div className="bar-track">
+              <div className="bar-fill" style={{ width: `${uploadProgress}%`, transition: 'width 0.3s' }} />
+            </div>
+            <span>Uploading… {uploadProgress}%</span>
+          </div>
+        )}
         {uploadError && <div className="upload-error">{uploadError}</div>}
       </div>
 
       <div className="modal-form-actions">
-        <button type="submit" className="btn btn-primary" disabled={uploading}>{uploading ? 'Uploading…' : 'Save Course'}</button>
+        <button type="submit" className="btn btn-primary" disabled={uploading}>
+          {uploading ? 'Uploading…' : 'Save Course'}
+        </button>
       </div>
     </form>
   )
