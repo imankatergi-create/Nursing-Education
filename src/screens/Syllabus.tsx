@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import type { Course, CourseModule, Lesson, Material } from '../types'
+import type { Syllabus, CourseModule, Lesson, Material } from '../types'
 
 interface LessonMaterialRow extends Material {
   _watch_pct: number
@@ -11,9 +11,9 @@ interface LessonMaterialRow extends Material {
 interface MatConfig { watch_pct: number; duration_text: string }
 
 export default function SyllabusScreen() {
-  const { params, toast, openModal, closeModal } = useApp()
-  const [courses, setCourses] = useState<Course[]>([])
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
+  const { toast, openModal, closeModal } = useApp()
+  const [syllabi, setSyllabi] = useState<Syllabus[]>([])
+  const [selected, setSelected] = useState<Syllabus | null>(null)
   const [modules, setModules] = useState<CourseModule[]>([])
   const [lessons, setLessons] = useState<Record<string, Lesson[]>>({})
   const [lessonMaterials, setLessonMaterials] = useState<Record<string, LessonMaterialRow[]>>({})
@@ -21,36 +21,46 @@ export default function SyllabusScreen() {
 
   useEffect(() => {
     ;(async () => {
-      const { data } = await supabase.from('courses').select('*').order('title')
-      const list = data ?? []
-      setCourses(list)
-      const target = list.find(c => c.id === params.courseId) ?? list[0]
-      if (target) loadCourse(target)
+      const { data } = await supabase.from('syllabi').select('*').order('title')
+      const list = (data ?? []) as Syllabus[]
+      setSyllabi(list)
+      if (list[0]) loadSyllabus(list[0])
     })()
-  }, [params.courseId])
+  }, [])
 
-  async function loadCourse(course: Course) {
-    setSelectedCourse(course)
+  async function reloadList() {
+    const { data } = await supabase.from('syllabi').select('*').order('title')
+    setSyllabi((data ?? []) as Syllabus[])
+  }
+
+  async function loadSyllabus(syl: Syllabus) {
+    setSelected(syl)
     setLoading(true)
-    const { data: mods } = await supabase.from('course_modules').select('*').eq('course_id', course.id).order('order_index')
-    const modList = mods ?? []
+    const { data: mods } = await supabase
+      .from('course_modules')
+      .select('*')
+      .eq('syllabus_id', syl.id)
+      .order('order_index')
+    const modList = (mods ?? []) as CourseModule[]
     setModules(modList)
     const lessonMap: Record<string, Lesson[]> = {}
     const materialMap: Record<string, LessonMaterialRow[]> = {}
     for (const m of modList) {
-      const { data: ls } = await supabase.from('lessons').select('*').eq('module_id', m.id).order('order_index')
-      lessonMap[m.id] = ls ?? []
-      for (const l of (ls ?? [])) {
+      const { data: ls } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('module_id', m.id)
+        .order('order_index')
+      lessonMap[m.id] = (ls ?? []) as Lesson[]
+      for (const l of (ls ?? []) as Lesson[]) {
         const { data: lm } = await supabase
           .from('lesson_materials')
           .select('required_watch_pct, duration_text, material_id, materials(*)')
           .eq('lesson_id', l.id)
           .order('order_index')
-        materialMap[l.id] = ((lm ?? []) as any[]).map(r => ({
-          ...r.materials,
-          _watch_pct: r.required_watch_pct ?? 100,
-          _duration: r.duration_text ?? '',
-        })).filter((r: any) => r?.id)
+        materialMap[l.id] = ((lm ?? []) as any[])
+          .map(r => ({ ...r.materials, _watch_pct: r.required_watch_pct ?? 100, _duration: r.duration_text ?? '' }))
+          .filter((r: any) => r?.id)
       }
     }
     setLessons(lessonMap)
@@ -77,72 +87,149 @@ export default function SyllabusScreen() {
   async function deleteModule(mod: CourseModule) {
     if (!confirm(`Delete module "${mod.title}" and all its lessons?`)) return
     await supabase.from('course_modules').delete().eq('id', mod.id)
-    if (selectedCourse) loadCourse(selectedCourse)
+    if (selected) loadSyllabus(selected)
     toast('Module deleted')
   }
 
   async function deleteLesson(lesson: Lesson) {
     if (!confirm(`Delete lesson "${lesson.title}"?`)) return
     await supabase.from('lessons').delete().eq('id', lesson.id)
-    if (selectedCourse) loadCourse(selectedCourse)
+    if (selected) loadSyllabus(selected)
     toast('Lesson deleted')
   }
 
+  function openCreateSyllabus() {
+    openModal({
+      title: 'Create Syllabus',
+      body: (
+        <SyllabusForm
+          onSave={async d => {
+            const { data, error } = await supabase
+              .from('syllabi')
+              .insert(d)
+              .select('*')
+              .maybeSingle()
+            if (error) { toast('Error: ' + error.message); return }
+            await reloadList()
+            if (data) loadSyllabus(data as Syllabus)
+            closeModal()
+            toast('Syllabus created')
+          }}
+        />
+      ),
+    })
+  }
+
+  function openEditSyllabus(syl: Syllabus) {
+    openModal({
+      title: 'Edit Syllabus',
+      body: (
+        <SyllabusForm
+          initial={syl}
+          onSave={async d => {
+            await supabase.from('syllabi').update(d).eq('id', syl.id)
+            await reloadList()
+            setSelected(s => s?.id === syl.id ? { ...s, ...d } : s)
+            closeModal()
+            toast('Syllabus updated')
+          }}
+        />
+      ),
+    })
+  }
+
+  async function deleteSyllabus(syl: Syllabus) {
+    if (!confirm(`Delete syllabus "${syl.title}" and all its modules/lessons?`)) return
+    await supabase.from('syllabi').delete().eq('id', syl.id)
+    const remaining = syllabi.filter(s => s.id !== syl.id)
+    setSyllabi(remaining)
+    if (selected?.id === syl.id) {
+      if (remaining[0]) loadSyllabus(remaining[0])
+      else { setSelected(null); setModules([]) }
+    }
+    toast('Syllabus deleted')
+  }
+
   function openAddModule() {
-    if (!selectedCourse) return
+    if (!selected) return
     openModal({
       title: 'Add Module',
-      body: <ModuleForm onSave={async d => {
-        await supabase.from('course_modules').insert({ ...d, course_id: selectedCourse.id, order_index: modules.length + 1 })
-        loadCourse(selectedCourse); closeModal(); toast('Module added')
-      }} />,
+      body: (
+        <ModuleForm
+          onSave={async d => {
+            const { error } = await supabase
+              .from('course_modules')
+              .insert({ ...d, syllabus_id: selected.id, order_index: modules.length + 1 })
+            if (error) { toast('Error: ' + error.message); return }
+            loadSyllabus(selected)
+            closeModal()
+            toast('Module added')
+          }}
+        />
+      ),
     })
   }
 
   function openEditModule(mod: CourseModule) {
     openModal({
       title: 'Edit Module',
-      body: <ModuleForm initial={mod} onSave={async d => {
-        await supabase.from('course_modules').update(d).eq('id', mod.id)
-        if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Module updated')
-      }} />,
+      body: (
+        <ModuleForm
+          initial={mod}
+          onSave={async d => {
+            await supabase.from('course_modules').update(d).eq('id', mod.id)
+            if (selected) loadSyllabus(selected)
+            closeModal()
+            toast('Module updated')
+          }}
+        />
+      ),
     })
   }
 
   function openAddLesson(moduleId: string) {
     openModal({
       title: 'Add Lesson', wide: true,
-      body: <LessonForm onSave={async (d, matConfigs) => {
-        const count = (lessons[moduleId] ?? []).length
-        const payload: Record<string, unknown> = { ...d, module_id: moduleId, order_index: count + 1 }
-        if (!payload.quiz_id) delete payload.quiz_id
-        const { data: created, error } = await supabase
-          .from('lessons')
-          .insert(payload)
-          .select('id')
-          .maybeSingle()
-        if (error) { toast('Error saving lesson: ' + error.message); return }
-        if (created?.id) await saveLessonMaterials(created.id, matConfigs)
-        if (selectedCourse) loadCourse(selectedCourse)
-        closeModal()
-        toast('Lesson added')
-      }} />,
+      body: (
+        <LessonForm
+          onSave={async (d, matConfigs) => {
+            const count = (lessons[moduleId] ?? []).length
+            const payload: Record<string, unknown> = { ...d, module_id: moduleId, order_index: count + 1 }
+            if (!payload.quiz_id) delete payload.quiz_id
+            const { data: created, error } = await supabase
+              .from('lessons')
+              .insert(payload)
+              .select('id')
+              .maybeSingle()
+            if (error) { toast('Error saving lesson: ' + error.message); return }
+            if (created?.id) await saveLessonMaterials(created.id, matConfigs)
+            if (selected) loadSyllabus(selected)
+            closeModal()
+            toast('Lesson added')
+          }}
+        />
+      ),
     })
   }
 
   function openEditLesson(lesson: Lesson) {
     openModal({
       title: 'Edit Lesson', wide: true,
-      body: <LessonForm initial={lesson} onSave={async (d, matConfigs) => {
-        const payload: Record<string, unknown> = { ...d }
-        if (!payload.quiz_id) payload.quiz_id = null
-        const { error } = await supabase.from('lessons').update(payload).eq('id', lesson.id)
-        if (error) { toast('Error updating lesson: ' + error.message); return }
-        await saveLessonMaterials(lesson.id, matConfigs)
-        if (selectedCourse) loadCourse(selectedCourse)
-        closeModal()
-        toast('Lesson updated')
-      }} />,
+      body: (
+        <LessonForm
+          initial={lesson}
+          onSave={async (d, matConfigs) => {
+            const payload: Record<string, unknown> = { ...d }
+            if (!payload.quiz_id) payload.quiz_id = null
+            const { error } = await supabase.from('lessons').update(payload).eq('id', lesson.id)
+            if (error) { toast('Error updating lesson: ' + error.message); return }
+            await saveLessonMaterials(lesson.id, matConfigs)
+            if (selected) loadSyllabus(selected)
+            closeModal()
+            toast('Lesson updated')
+          }}
+        />
+      ),
     })
   }
 
@@ -154,26 +241,62 @@ export default function SyllabusScreen() {
       <div className="screen-header">
         <div>
           <h1 className="screen-title">Syllabus Builder</h1>
-          <p className="screen-subtitle">Manage course modules, lessons and materials</p>
+          <p className="screen-subtitle">Build reusable curriculum syllabuses with modules and lessons</p>
         </div>
-        <button className="btn btn-primary" onClick={openAddModule} disabled={!selectedCourse}>+ Add Module</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {selected && (
+            <button className="btn btn-outline" onClick={() => openAddModule()}>+ Add Module</button>
+          )}
+          <button className="btn btn-primary" onClick={openCreateSyllabus}>+ Create Syllabus</button>
+        </div>
       </div>
 
       <div className="syllabus-layout">
+        {/* ── Left: syllabus list ── */}
         <div className="syllabus-sidebar">
-          <h4>Courses</h4>
-          {courses.length === 0 ? (
-            <div style={{ padding: '8px', color: 'var(--muted)', fontSize: 13 }}>No courses yet.</div>
-          ) : courses.map(c => (
-            <button key={c.id} className={`syllabus-course-item${selectedCourse?.id === c.id ? ' active' : ''}`} onClick={() => loadCourse(c)}>
-              <div className="syllabus-course-title">{c.title}</div>
-              <div className="syllabus-course-code">{c.code}</div>
-            </button>
+          <h4>Syllabuses</h4>
+          {syllabi.length === 0 ? (
+            <div style={{ padding: '8px', color: 'var(--muted)', fontSize: 13 }}>
+              No syllabuses yet. Click "+ Create Syllabus".
+            </div>
+          ) : syllabi.map(s => (
+            <div
+              key={s.id}
+              className={`syllabus-course-item${selected?.id === s.id ? ' active' : ''}`}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer', width: '100%' }}
+              onClick={() => loadSyllabus(s)}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="syllabus-course-title">{s.title}</div>
+                {s.description && (
+                  <div className="syllabus-course-code" style={{ whiteSpace: 'normal', lineHeight: 1.3 }}>
+                    {s.description}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 3, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                <button
+                  className="btn btn-sm btn-outline"
+                  style={{ padding: '2px 6px', fontSize: 11 }}
+                  onClick={() => openEditSyllabus(s)}
+                >✎</button>
+                <button
+                  className="btn btn-sm btn-danger"
+                  style={{ padding: '2px 6px', fontSize: 11 }}
+                  onClick={() => deleteSyllabus(s)}
+                >✕</button>
+              </div>
+            </div>
           ))}
         </div>
 
+        {/* ── Right: modules + lessons ── */}
         <div className="syllabus-content">
-          {loading ? <div className="loading-state">Loading…</div> : modules.length === 0 ? (
+          {!selected ? (
+            <div className="empty-state">Select or create a syllabus to get started.</div>
+          ) : loading ? (
+            <div className="loading-state">Loading…</div>
+          ) : modules.length === 0 ? (
             <div className="empty-state">No modules yet. Click "+ Add Module" to get started.</div>
           ) : modules.map(mod => (
             <div key={mod.id} className="module-block">
@@ -187,7 +310,9 @@ export default function SyllabusScreen() {
               </div>
               <div className="lessons-list">
                 {(lessons[mod.id] ?? []).length === 0 ? (
-                  <div style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: 13 }}>No lessons yet — add one above.</div>
+                  <div style={{ padding: '12px 16px', color: 'var(--muted)', fontSize: 13 }}>
+                    No lessons yet — add one above.
+                  </div>
                 ) : (lessons[mod.id] ?? []).map(lesson => (
                   <div key={lesson.id} className="lesson-row">
                     <span className="lesson-type-icon">{typeIcon[lesson.type] ?? '📌'}</span>
@@ -222,12 +347,50 @@ export default function SyllabusScreen() {
   )
 }
 
+/* ── Sub-forms ─────────────────────────────────────────────────────── */
+
+function SyllabusForm({
+  initial,
+  onSave,
+}: {
+  initial?: Syllabus
+  onSave: (d: { title: string; description: string }) => void
+}) {
+  const [title, setTitle] = useState(initial?.title ?? '')
+  const [description, setDescription] = useState(initial?.description ?? '')
+  return (
+    <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave({ title, description }) }}>
+      <div className="form-group">
+        <label>Syllabus Title</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} required autoFocus placeholder="e.g. ICU Nursing Fundamentals" />
+      </div>
+      <div className="form-group">
+        <label>Description</label>
+        <textarea
+          rows={3}
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Brief overview of what this syllabus covers…"
+        />
+      </div>
+      <div className="modal-form-actions">
+        <button type="submit" className="btn btn-primary">{initial ? 'Save Changes' : 'Create Syllabus'}</button>
+      </div>
+    </form>
+  )
+}
+
 function ModuleForm({ initial, onSave }: { initial?: CourseModule; onSave: (d: { title: string }) => void }) {
   const [title, setTitle] = useState(initial?.title ?? '')
   return (
     <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave({ title }) }}>
-      <div className="form-group"><label>Module Title</label><input value={title} onChange={e => setTitle(e.target.value)} required autoFocus /></div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">{initial ? 'Save' : 'Add'}</button></div>
+      <div className="form-group">
+        <label>Module Title</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} required autoFocus />
+      </div>
+      <div className="modal-form-actions">
+        <button type="submit" className="btn btn-primary">{initial ? 'Save' : 'Add'}</button>
+      </div>
     </form>
   )
 }
@@ -263,7 +426,10 @@ function LessonForm({
         supabase.from('quizzes').select('id, title').order('title'),
         supabase.from('materials').select('*').order('title'),
         initial?.id
-          ? supabase.from('lesson_materials').select('material_id, required_watch_pct, duration_text').eq('lesson_id', initial.id)
+          ? supabase
+              .from('lesson_materials')
+              .select('material_id, required_watch_pct, duration_text')
+              .eq('lesson_id', initial.id)
           : Promise.resolve({ data: [] }),
       ])
       setQuizzes(q ?? [])
@@ -326,7 +492,6 @@ function LessonForm({
         <input value={form.requirement} onChange={e => setForm(f => ({ ...f, requirement: e.target.value }))} placeholder="e.g. Watch 90%, Score ≥80%" />
       </div>
 
-      {/* ── Materials ─────────────────────────────────────── */}
       <div className="form-section-title" style={{ marginTop: 16 }}>
         Attach Materials
         <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 12, marginLeft: 6, color: 'var(--faint)', letterSpacing: 0 }}>— optional</span>
@@ -336,7 +501,7 @@ function LessonForm({
         <div style={{ color: 'var(--muted)', fontSize: 13, padding: '8px 0' }}>Loading materials…</div>
       ) : allMaterials.length === 0 ? (
         <div style={{ color: 'var(--muted)', fontSize: 13, padding: '8px 0' }}>
-          No materials in library yet. Upload materials first from the Materials screen.
+          No materials in library yet. Upload from the Materials screen first.
         </div>
       ) : (
         <div className="mat-picker">

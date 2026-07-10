@@ -3,9 +3,13 @@ import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 import type { Course } from '../types'
 
+interface CourseWithSyllabi extends Course {
+  course_syllabuses: { syllabi: { id: string; title: string } | null }[]
+}
+
 export default function CoursesScreen() {
   const { navigate, toast, openModal, closeModal } = useApp()
-  const [courses, setCourses] = useState<Course[]>([])
+  const [courses, setCourses] = useState<CourseWithSyllabi[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [catFilter, setCatFilter] = useState('all')
@@ -14,8 +18,11 @@ export default function CoursesScreen() {
 
   async function fetchCourses() {
     setLoading(true)
-    const { data } = await supabase.from('courses').select('*').order('title')
-    setCourses(data ?? [])
+    const { data } = await supabase
+      .from('courses')
+      .select('*, course_syllabuses(syllabi(id, title))')
+      .order('title')
+    setCourses((data ?? []) as CourseWithSyllabi[])
     setLoading(false)
   }
 
@@ -36,8 +43,18 @@ export default function CoursesScreen() {
       title: 'Create Course', wide: true,
       body: (
         <CourseForm
-          onSave={async d => {
-            await supabase.from('courses').insert(d)
+          onSave={async (d, syllabusIds) => {
+            const { data: created, error } = await supabase
+              .from('courses')
+              .insert(d)
+              .select('id')
+              .maybeSingle()
+            if (error || !created) { toast('Error creating course: ' + (error?.message ?? '')); return }
+            if (syllabusIds.length > 0) {
+              await supabase.from('course_syllabuses').insert(
+                syllabusIds.map(sid => ({ course_id: created.id, syllabus_id: sid }))
+              )
+            }
             fetchCourses()
             closeModal()
             toast('Course created')
@@ -47,14 +64,24 @@ export default function CoursesScreen() {
     })
   }
 
-  function openEdit(course: Course) {
+  function openEdit(course: CourseWithSyllabi) {
     openModal({
       title: 'Edit Course', wide: true,
       body: (
         <CourseForm
           initial={course}
-          onSave={async d => {
-            await supabase.from('courses').update(d).eq('id', course.id)
+          initialSyllabusIds={(course.course_syllabuses ?? [])
+            .map(cs => cs.syllabi?.id)
+            .filter(Boolean) as string[]}
+          onSave={async (d, syllabusIds) => {
+            const { error } = await supabase.from('courses').update(d).eq('id', course.id)
+            if (error) { toast('Error saving course: ' + error.message); return }
+            await supabase.from('course_syllabuses').delete().eq('course_id', course.id)
+            if (syllabusIds.length > 0) {
+              await supabase.from('course_syllabuses').insert(
+                syllabusIds.map(sid => ({ course_id: course.id, syllabus_id: sid }))
+              )
+            }
             fetchCourses()
             closeModal()
             toast('Course saved')
@@ -118,6 +145,15 @@ export default function CoursesScreen() {
                 <span>🌐 {c.lang}</span>
               </div>
               {c.mandatory && <span className="tag tag-red" style={{ marginTop: 4 }}>Mandatory</span>}
+              {(c.course_syllabuses ?? []).length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                  {(c.course_syllabuses ?? []).map(cs => cs.syllabi && (
+                    <span key={cs.syllabi.id} className="badge badge-teal" style={{ fontSize: 10 }}>
+                      📋 {cs.syllabi.title}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="course-card-actions">
                 <button className="btn btn-sm" onClick={() => navigate('syllabus', { courseId: c.id })}>Syllabus</button>
                 <button className="btn btn-sm btn-outline" onClick={() => openEdit(c)}>Edit</button>
@@ -165,7 +201,15 @@ function CourseDetail({ course }: { course: Course }) {
   )
 }
 
-function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d: Partial<Course>) => void }) {
+function CourseForm({
+  initial,
+  initialSyllabusIds = [],
+  onSave,
+}: {
+  initial?: Partial<Course>
+  initialSyllabusIds?: string[]
+  onSave: (d: Partial<Course>, syllabusIds: string[]) => void
+}) {
   const [form, setForm] = useState({
     title: '', code: '', category: 'Clinical', audience: 'All Nurses', duration: '2h', level: 'Beginner',
     lang: 'English', instructor: '', prerequisites: 'None', mandatory: false, status: 'draft',
@@ -181,6 +225,23 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const [allSyllabi, setAllSyllabi] = useState<{ id: string; title: string; description: string }[]>([])
+  const [selectedSylIds, setSelectedSylIds] = useState<Set<string>>(new Set(initialSyllabusIds))
+
+  useEffect(() => {
+    supabase.from('syllabi').select('id, title, description').order('title').then(({ data }) => {
+      setAllSyllabi(data ?? [])
+    })
+  }, [])
+
+  function toggleSyl(id: string) {
+    setSelectedSylIds(s => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
 
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
 
@@ -201,25 +262,15 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
 
   async function uploadVideo(): Promise<string | null> {
     if (!videoFile) return form.video_url || null
-
     setUploading(true)
     setUploadProgress(0)
     setUploadError('')
-
     const safeName = `${Date.now()}-${videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const path = `courses/${safeName}`
-
     const { error } = await supabase.storage
       .from('course-videos')
-      .upload(path, videoFile, { upsert: true })
-
-    if (error) {
-      setUploadError(`Upload failed: ${error.message}`)
-      setUploading(false)
-      return null
-    }
-
-    const { data: { publicUrl } } = supabase.storage.from('course-videos').getPublicUrl(path)
+      .upload(`courses/${safeName}`, videoFile, { upsert: true })
+    if (error) { setUploadError(`Upload failed: ${error.message}`); setUploading(false); return null }
+    const { data: { publicUrl } } = supabase.storage.from('course-videos').getPublicUrl(`courses/${safeName}`)
     setUploadProgress(100)
     setUploading(false)
     return publicUrl
@@ -227,11 +278,9 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-
     let videoUrl = form.video_url
     let videoFilename = form.video_filename
     let videoSizeMb = form.video_size_mb
-
     if (videoFile) {
       const url = await uploadVideo()
       if (!url) return
@@ -239,13 +288,11 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
       videoFilename = videoFile.name
       videoSizeMb = parseFloat((videoFile.size / 1024 / 1024).toFixed(2))
     }
-
-    const objectives = objectivesText
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean)
-
-    onSave({ ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb, objectives })
+    const objectives = objectivesText.split('\n').map(s => s.trim()).filter(Boolean)
+    onSave(
+      { ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb, objectives },
+      Array.from(selectedSylIds)
+    )
   }
 
   const hasExistingVideo = !videoFile && form.video_url
@@ -284,13 +331,54 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
       <div className="form-group">
         <label>Objectives <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(one per line)</span></label>
         <textarea
-          rows={4}
+          rows={3}
           value={objectivesText}
           onChange={e => setObjectivesText(e.target.value)}
-          placeholder="Understand infection control procedures&#10;Apply hand hygiene protocols&#10;Identify isolation requirements"
+          placeholder="Understand infection control procedures&#10;Apply hand hygiene protocols"
         />
       </div>
 
+      {/* ── Syllabuses ── */}
+      <div className="form-section-title" style={{ marginTop: 16 }}>
+        Link Syllabuses
+        <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 12, marginLeft: 6, color: 'var(--faint)', letterSpacing: 0 }}>— optional</span>
+      </div>
+      {allSyllabi.length === 0 ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13, padding: '4px 0 8px' }}>
+          No syllabuses yet. Create one in the Syllabus Builder first.
+        </div>
+      ) : (
+        <div className="mat-picker" style={{ marginBottom: 8 }}>
+          {allSyllabi.map(s => {
+            const sel = selectedSylIds.has(s.id)
+            return (
+              <div
+                key={s.id}
+                className={`mat-card${sel ? ' selected' : ''}`}
+                onClick={() => toggleSyl(s.id)}
+              >
+                <div className="mat-card-row">
+                  <svg className="mat-checkbox" width="18" height="18" viewBox="0 0 18 18">
+                    <rect x="1" y="1" width="16" height="16" rx="3"
+                      fill={sel ? '#0891b2' : '#fff'}
+                      stroke={sel ? '#0891b2' : '#cbd5e1'}
+                      strokeWidth="2"
+                    />
+                    {sel && <path d="M4.5 9l3 3 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />}
+                  </svg>
+                  <div className="mat-info">
+                    <div className="mat-title">📋 {s.title}</div>
+                    {s.description && <div className="mat-sub">{s.description}</div>}
+                  </div>
+                  {sel && <span className="mat-badge-sel">✓ Linked</span>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Video ── */}
       <div className="form-section-title">Course Video</div>
       <div className="video-upload-area">
         {hasExistingVideo ? (
@@ -329,7 +417,6 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
             />
           </label>
         )}
-
         {uploading && (
           <div className="video-upload-progress">
             <div className="bar-track">
@@ -348,6 +435,11 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
       </div>
 
       <div className="modal-form-actions">
+        {selectedSylIds.size > 0 && (
+          <span style={{ color: 'var(--muted)', fontSize: 13, marginRight: 'auto' }}>
+            {selectedSylIds.size} syllabus{selectedSylIds.size !== 1 ? 'es' : ''} linked
+          </span>
+        )}
         <button type="submit" className="btn btn-primary" disabled={uploading}>
           {uploading ? 'Uploading…' : 'Save Course'}
         </button>

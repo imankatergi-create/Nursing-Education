@@ -58,9 +58,17 @@ export interface Course {
   video_duration_sec?: number
 }
 
+export interface Syllabus {
+  id: string
+  title: string
+  description: string
+  created_at: string
+}
+
 export interface CourseModule {
   id: string
-  course_id: string
+  course_id: string | null
+  syllabus_id: string | null
   title: string
   order_index: number
 }
