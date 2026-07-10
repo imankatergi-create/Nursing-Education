@@ -224,10 +224,10 @@ function LessonForm({ initial, onSave }: { initial?: Partial<Lesson>; onSave: (d
         videoUrl = supabase.storage.from('course-videos').getPublicUrl(path).data.publicUrl
       }
       if (docFile) {
-        const path = `${Date.now()}-${docFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-        const { error } = await supabase.storage.from('materials').upload(path, docFile, { upsert: true })
+        const path = `lessons/${Date.now()}-${docFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+        const { error } = await supabase.storage.from('course-materials').upload(path, docFile, { upsert: true })
         if (error) throw new Error(`Document upload failed: ${error.message}`)
-        docUrl = supabase.storage.from('materials').getPublicUrl(path).data.publicUrl
+        docUrl = supabase.storage.from('course-materials').getPublicUrl(path).data.publicUrl
         docFilename = docFile.name
       }
     } catch (err: unknown) {
