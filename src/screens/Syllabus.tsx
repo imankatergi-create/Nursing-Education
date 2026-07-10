@@ -319,7 +319,7 @@ function LessonForm({
       {/* ── Materials ─────────────────────────────────────── */}
       <div className="form-section-title" style={{ marginTop: 16 }}>
         Attach Materials
-        <span style={{ fontWeight: 400, color: 'var(--muted)', fontSize: 12, marginLeft: 6 }}>— optional</span>
+        <span style={{ fontWeight: 400, textTransform: 'none', fontSize: 12, marginLeft: 6, color: 'var(--faint)', letterSpacing: 0 }}>— optional</span>
       </div>
 
       {loadingMats ? (
@@ -329,77 +329,50 @@ function LessonForm({
           No materials in library yet. Upload materials first from the Materials screen.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 300, overflowY: 'auto', paddingRight: 2 }}>
+        <div className="mat-picker">
           {allMaterials.map(m => {
             const sel = selectedIds.has(m.id)
             const cfg = matConfigs[m.id] ?? { watch_pct: 100, duration_text: '' }
+            const typeEmoji: Record<string, string> = { video: '🎬', doc: '📄', link: '🔗', scorm: '📦', audio: '🎧', image: '🖼️' }
             return (
               <div
                 key={m.id}
-                style={{
-                  border: `2px solid ${sel ? '#0891b2' : '#e2e8f0'}`,
-                  borderRadius: 8,
-                  overflow: 'hidden',
-                  background: sel ? '#f0f9ff' : '#ffffff',
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                }}
+                className={`mat-card${sel ? ' selected' : ''}`}
                 onClick={() => toggleMat(m.id)}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px' }}>
-                  {/* SVG checkbox — immune to global CSS rules */}
-                  <svg width="18" height="18" viewBox="0 0 18 18" style={{ flexShrink: 0, display: 'block' }}>
+                <div className="mat-card-row">
+                  <svg className="mat-checkbox" width="18" height="18" viewBox="0 0 18 18">
                     <rect x="1" y="1" width="16" height="16" rx="3"
                       fill={sel ? '#0891b2' : '#fff'}
-                      stroke={sel ? '#0891b2' : '#94a3b8'}
+                      stroke={sel ? '#0891b2' : '#cbd5e1'}
                       strokeWidth="2"
                     />
                     {sel && <path d="M4.5 9l3 3 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />}
                   </svg>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', lineHeight: 1.3 }}>{m.title}</div>
-                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                      {m.type}{m.size_text ? ` · ${m.size_text}` : ''}
-                    </div>
+                  <div className="mat-info">
+                    <div className="mat-title">{typeEmoji[m.type] ?? '📎'} {m.title}</div>
+                    <div className="mat-sub">{m.type}{m.size_text ? ` · ${m.size_text}` : ''}</div>
                   </div>
-                  {sel && (
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, padding: '3px 9px',
-                      background: '#0891b2', color: '#fff', borderRadius: 20,
-                      whiteSpace: 'nowrap', flexShrink: 0,
-                    }}>
-                      Selected
-                    </span>
-                  )}
+                  {sel && <span className="mat-badge-sel">✓ On</span>}
                 </div>
-
                 {sel && (
-                  <div
-                    style={{ borderTop: '1px solid #bae6fd', padding: '10px 14px', background: '#f0f9ff' }}
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#0c4a6e', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          Required Watch %
-                        </div>
-                        <input
-                          type="number" min={0} max={100}
-                          value={cfg.watch_pct}
-                          onChange={e => updateMatConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                        />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#0c4a6e', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          Duration
-                        </div>
-                        <input
-                          type="text"
-                          value={cfg.duration_text}
-                          placeholder="e.g. 10 min"
-                          onChange={e => updateMatConfig(m.id, 'duration_text', e.target.value)}
-                        />
-                      </div>
+                  <div className="mat-config" onClick={e => e.stopPropagation()}>
+                    <div>
+                      <span className="mat-config-label">Required Watch %</span>
+                      <input
+                        type="number" min={0} max={100}
+                        value={cfg.watch_pct}
+                        onChange={e => updateMatConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                      />
+                    </div>
+                    <div>
+                      <span className="mat-config-label">Duration</span>
+                      <input
+                        type="text"
+                        value={cfg.duration_text}
+                        placeholder="e.g. 10 min"
+                        onChange={e => updateMatConfig(m.id, 'duration_text', e.target.value)}
+                      />
                     </div>
                   </div>
                 )}
