@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useApp } from '../context/AppContext'
 
 interface NurseProgress {
   profile_id: string; full_name: string; email: string; dept_id: string
@@ -7,13 +8,66 @@ interface NurseProgress {
   overdue: number; avg_score: number; last_activity: string
 }
 
+interface CourseLockRow {
+  id: string
+  profile_id: string
+  course_id: string
+  reason: string
+  locked_at: string
+  nurse_name: string
+  course_title: string
+}
+
 export default function ProgressScreen() {
+  const { toast, profile } = useApp()
   const [nurses, setNurses] = useState<NurseProgress[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('all')
+  const [lockedCourses, setLockedCourses] = useState<CourseLockRow[]>([])
+  const [loadingLocks, setLoadingLocks] = useState(true)
+  const [unlocking, setUnlocking] = useState<string | null>(null)
+
+  const canUnlock = ['superadmin', 'admin', 'educator', 'supervisor'].includes(profile?.role ?? '')
 
   useEffect(() => { fetchProgress() }, [])
+  useEffect(() => { if (canUnlock) fetchLockedCourses() }, [canUnlock])
+
+  async function fetchLockedCourses() {
+    setLoadingLocks(true)
+    const { data } = await supabase
+      .from('course_locks')
+      .select('id, profile_id, course_id, reason, locked_at, profiles(full_name), courses(title)')
+      .eq('is_locked', true)
+      .order('locked_at', { ascending: false })
+    const rows: CourseLockRow[] = (data ?? []).map((r: any) => ({
+      id: r.id,
+      profile_id: r.profile_id,
+      course_id: r.course_id,
+      reason: r.reason,
+      locked_at: r.locked_at,
+      nurse_name: r.profiles?.full_name ?? 'Unknown',
+      course_title: r.courses?.title ?? 'Unknown Course',
+    }))
+    setLockedCourses(rows)
+    setLoadingLocks(false)
+  }
+
+  async function handleUnlock(lock: CourseLockRow) {
+    setUnlocking(lock.id)
+    const { error } = await supabase
+      .from('course_locks')
+      .update({
+        is_locked: false,
+        unlocked_at: new Date().toISOString(),
+        unlocked_by: profile?.full_name ?? 'Admin',
+      })
+      .eq('id', lock.id)
+    setUnlocking(null)
+    if (error) { toast('Failed to unlock course'); return }
+    toast(`Unlocked "${lock.course_title}" for ${lock.nurse_name}`)
+    fetchLockedCourses()
+  }
 
   async function fetchProgress() {
     setLoading(true)
@@ -154,6 +208,48 @@ export default function ProgressScreen() {
           </table>
         </div>
       </div>
+
+      {canUnlock && (
+        <div className="card" style={{ marginTop: 32 }}>
+          <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h3 style={{ margin: 0 }}>Locked Courses</h3>
+            {!loadingLocks && lockedCourses.length > 0 && (
+              <span className="badge badge-red">{lockedCourses.length}</span>
+            )}
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr><th>Nurse</th><th>Course</th><th>Reason</th><th>Locked On</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                {loadingLocks ? (
+                  <tr><td colSpan={5} className="table-loading">Loading…</td></tr>
+                ) : lockedCourses.length === 0 ? (
+                  <tr><td colSpan={5} className="table-empty">No locked courses</td></tr>
+                ) : lockedCourses.map(lock => (
+                  <tr key={lock.id}>
+                    <td>{lock.nurse_name}</td>
+                    <td>{lock.course_title}</td>
+                    <td style={{ maxWidth: 240, fontSize: 13, color: 'var(--muted)' }}>{lock.reason}</td>
+                    <td>{new Date(lock.locked_at).toLocaleDateString()}</td>
+                    <td>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={() => handleUnlock(lock)}
+                        disabled={unlocking === lock.id}
+                        style={{ opacity: unlocking === lock.id ? 0.6 : 1 }}
+                      >
+                        {unlocking === lock.id ? 'Unlocking…' : 'Unlock'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

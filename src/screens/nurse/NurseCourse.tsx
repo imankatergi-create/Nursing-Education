@@ -31,6 +31,8 @@ export default function NurseCourse() {
   const [loadingProgress, setLoadingProgress] = useState(true)
   const [hasFeedback, setHasFeedback] = useState(false)
   const [showFeedbackModal, setShowFeedbackModal] = useState(false)
+  const [courseLocked, setCourseLocked] = useState(false)
+  const [lockRecord, setLockRecord] = useState<{ id: string; reason: string; locked_at: string } | null>(null)
 
   useEffect(() => {
     loadCourseData()
@@ -41,6 +43,10 @@ export default function NurseCourse() {
   }, [courseId, profileId, allLessonIds.length])
 
   useEffect(() => {
+    loadCourseLock()
+  }, [courseId, profileId])
+
+  useEffect(() => {
     supabase.from('feedback')
       .select('id')
       .eq('profile_id', profileId)
@@ -48,6 +54,18 @@ export default function NurseCourse() {
       .maybeSingle()
       .then(({ data }) => setHasFeedback(!!data))
   }, [courseId, profileId])
+
+  async function loadCourseLock() {
+    const { data } = await supabase
+      .from('course_locks')
+      .select('id, reason, locked_at')
+      .eq('profile_id', profileId)
+      .eq('course_id', courseId)
+      .eq('is_locked', true)
+      .maybeSingle()
+    setCourseLocked(!!data)
+    setLockRecord(data ?? null)
+  }
 
   async function loadCourseData() {
     const { data: c } = await supabase.from('courses').select('*').eq('id', courseId).maybeSingle()
@@ -150,6 +168,7 @@ export default function NurseCourse() {
   function getLessonStatus(id: string): LessonStatus {
     const p = progressMap[id]
     if (p?.completed) return 'done'
+    if (courseLocked) return 'locked'
     const idx = allLessonIds.indexOf(id)
     if (idx > 0) {
       const prev = progressMap[allLessonIds[idx - 1]]
@@ -177,6 +196,16 @@ export default function NurseCourse() {
       setShowFeedbackModal(true)
     }
   }
+
+  async function handleCourseLocked() {
+    await loadCourseLock()
+    backToCourse()
+  }
+
+  const totalLessons = allLessonIds.length
+  const doneCount = allLessonIds.filter(id => progressMap[id]?.completed).length
+  const coursePct = totalLessons > 0 ? Math.round((doneCount / totalLessons) * 100) : 0
+  const courseCompleted = totalLessons > 0 && doneCount === totalLessons
 
   if (params.view === 'video') return (
     <VideoPlayer
@@ -207,14 +236,13 @@ export default function NurseCourse() {
       lessonId={params.lessonId ?? ''}
       profileId={profileId}
       initialScore={progressMap[params.lessonId ?? '']?.quiz_score ?? null}
+      courseCompleted={courseCompleted}
+      courseLocked={courseLocked}
       onBack={backToCourse}
       onCompleted={handleLessonCompleted}
+      onCourseLocked={handleCourseLocked}
     />
   )
-
-  const totalLessons = allLessonIds.length
-  const doneCount = allLessonIds.filter(id => progressMap[id]?.completed).length
-  const coursePct = totalLessons > 0 ? Math.round((doneCount / totalLessons) * 100) : 0
 
   const typeIcon: Record<string, string> = { video: '🎬', doc: '📄', quiz: '❓', eval: '📝' }
   const statusIcon: Record<LessonStatus, string> = { done: '✅', inprog: '▶️', todo: '⭕', locked: '🔒' }
@@ -231,6 +259,23 @@ export default function NurseCourse() {
           onSubmitted={() => { setHasFeedback(true); setShowFeedbackModal(false) }}
         />
       )}
+
+      {courseLocked && (
+        <div style={{
+          background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 10,
+          padding: '14px 20px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ fontSize: 22 }}>🔒</span>
+          <div>
+            <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: 14 }}>Course Locked</div>
+            <div style={{ color: '#dc2626', fontSize: 13 }}>
+              {lockRecord?.reason ?? 'This course has been locked due to exceeding quiz attempts.'} Contact your supervisor or educator to unlock.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="back-nav">
         <button className="btn btn-sm btn-outline" onClick={() => navigate('ncourses')}>← Back to Courses</button>
       </div>
@@ -1037,43 +1082,127 @@ function DocViewer({
 
 // ─── QuizPlayer ──────────────────────────────────────────────────────────────
 
+interface QuizConfig {
+  id: string
+  title: string
+  pass_score: number
+  time_limit_min: number
+  max_attempts: number
+}
+
+interface QQuestion {
+  id: string
+  question: string
+  type: string
+  options: string[]
+  correct_answer: number
+  explanation: string
+  points: number
+}
+
+interface QAttempt {
+  id: string
+  score_pct: number
+  passed: boolean
+  answers: number[]
+  attempted_at: string
+}
+
 function QuizPlayer({
-  course, courseId, lessonId, profileId, initialScore, onBack, onCompleted,
+  course, courseId, lessonId, profileId, initialScore,
+  courseCompleted, courseLocked,
+  onBack, onCompleted, onCourseLocked,
 }: {
   course: Course | null
   courseId: string
   lessonId: string
   profileId: string
   initialScore: number | null
+  courseCompleted: boolean
+  courseLocked: boolean
   onBack: () => void
   onCompleted: () => void
+  onCourseLocked: () => void
 }) {
-  const [phase, setPhase] = useState<'start' | 'quiz' | 'result'>('start')
+  const [phase, setPhase] = useState<'loading' | 'no_quiz' | 'start' | 'quiz' | 'result' | 'locked_out'>('loading')
+  const [quiz, setQuiz] = useState<QuizConfig | null>(null)
+  const [questions, setQuestions] = useState<QQuestion[]>([])
+  const [attempts, setAttempts] = useState<QAttempt[]>([])
+  const [freshCount, setFreshCount] = useState(0)
   const [qIdx, setQIdx] = useState(0)
   const [answers, setAnswers] = useState<Record<number, number>>({})
-  const [timeLeft, setTimeLeft] = useState(900)
-  const [resultPct, setResultPct] = useState<number>(initialScore ?? 0)
+  const [timeLeft, setTimeLeft] = useState(0)
+  const [resultPct, setResultPct] = useState(0)
   const [resultPassed, setResultPassed] = useState(false)
+  const [lastAnswers, setLastAnswers] = useState<number[]>([])
   const answersRef = useRef(answers)
   answersRef.current = answers
 
-  const questions = [
-    { q: 'What is the minimum hand hygiene duration recommended by WHO?', opts: ['10 seconds', '20–30 seconds', '45 seconds', '60 seconds'], correct: 1 },
-    { q: 'Which PPE is required for airborne precautions?', opts: ['Surgical mask', 'N95 respirator', 'Gloves only', 'Gown and gloves'], correct: 1 },
-    { q: 'When should gloves be changed between patients?', opts: ['Only if visibly soiled', 'After every patient', 'After two patients', 'When requested by supervisor'], correct: 1 },
-    { q: 'Isolation precautions should be based on:', opts: ['Patient age', 'Type of suspected or confirmed infection', 'Doctor preference', 'Bed availability'], correct: 1 },
-    { q: 'True or False: Hand sanitizer is effective against C. difficile spores.', opts: ['True', 'False', 'Sometimes', 'Depends on concentration'], correct: 1 },
-  ]
+  useEffect(() => { loadQuizData() }, [lessonId])
+
+  async function loadQuizData() {
+    const { data: lesson } = await supabase.from('lessons').select('quiz_id').eq('id', lessonId).maybeSingle()
+    if (!lesson?.quiz_id) { setPhase('no_quiz'); return }
+
+    const { data: quizData } = await supabase
+      .from('quizzes')
+      .select('id, title, pass_score, time_limit_min, max_attempts')
+      .eq('id', lesson.quiz_id)
+      .maybeSingle()
+    if (!quizData) { setPhase('no_quiz'); return }
+    setQuiz(quizData)
+    setTimeLeft(quizData.time_limit_min * 60)
+
+    const { data: qs } = await supabase
+      .from('quiz_questions')
+      .select('id, question, type, options, correct_answer, explanation, points, order_index')
+      .eq('quiz_id', quizData.id)
+      .order('order_index')
+    const qList = (qs ?? []) as QQuestion[]
+    setQuestions(qList)
+
+    const { data: attemptsData } = await supabase
+      .from('quiz_attempts')
+      .select('id, score_pct, passed, answers, attempted_at')
+      .eq('profile_id', profileId)
+      .eq('lesson_id', lessonId)
+      .order('attempted_at', { ascending: false })
+    const allAttempts = (attemptsData ?? []) as QAttempt[]
+    setAttempts(allAttempts)
+
+    if (allAttempts.length > 0) {
+      const last = allAttempts[0]
+      setLastAnswers(Array.isArray(last.answers) ? last.answers : [])
+    }
+
+    if (courseLocked) { setPhase('locked_out'); return }
+
+    const fc = await getFreshAttemptCount(quizData.id)
+    setFreshCount(fc)
+    if (fc >= quizData.max_attempts) { setPhase('locked_out'); return }
+
+    setPhase('start')
+  }
+
+  async function getFreshAttemptCount(_quizId: string): Promise<number> {
+    const { data: lockRow } = await supabase
+      .from('course_locks')
+      .select('unlocked_at, is_locked')
+      .eq('profile_id', profileId)
+      .eq('course_id', courseId)
+      .maybeSingle()
+
+    let q = supabase.from('quiz_attempts').select('id').eq('profile_id', profileId).eq('lesson_id', lessonId)
+    if (lockRow?.unlocked_at && !lockRow.is_locked) q = q.gt('attempted_at', lockRow.unlocked_at)
+    const { data } = await q
+    return (data ?? []).length
+  }
 
   useEffect(() => {
     if (phase !== 'quiz') return
     const t = setInterval(() => {
       setTimeLeft(p => {
-        if (p <= 1) {
-          clearInterval(t)
-          submitQuiz(answersRef.current)
-          return 0
-        }
+        if (p <= 1) { clearInterval(t); submitQuiz(answersRef.current); return 0 }
         return p - 1
       })
     }, 1000)
@@ -1081,14 +1210,37 @@ function QuizPlayer({
   }, [phase])
 
   async function submitQuiz(finalAnswers: Record<number, number>) {
-    const correct = questions.filter((q, i) => finalAnswers[i] === q.correct).length
-    const pct = Math.round((correct / questions.length) * 100)
-    const passed = pct >= 80
+    if (!quiz || questions.length === 0) return
 
-    // Keep best score
+    let totalPoints = 0; let earnedPoints = 0
+    for (let i = 0; i < questions.length; i++) {
+      totalPoints += questions[i].points
+      if (finalAnswers[i] === questions[i].correct_answer) earnedPoints += questions[i].points
+    }
+    const pct = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
+    const passed = pct >= quiz.pass_score
+    const answersArr = questions.map((_, i) => finalAnswers[i] ?? -1)
+    setLastAnswers(answersArr)
+
+    const now = new Date().toISOString()
+    await supabase.from('quiz_attempts').insert({
+      profile_id: profileId,
+      course_id: courseId,
+      lesson_id: lessonId,
+      quiz_id: quiz.id,
+      score_pct: pct,
+      passed,
+      answers: answersArr,
+      attempt_number: attempts.length + 1,
+      started_at: now,
+      submitted_at: now,
+      score: earnedPoints,
+      total_points: totalPoints,
+      percentage: pct,
+    })
+
     const bestScore = Math.max(pct, initialScore ?? 0)
-    const bestPassed = passed || (initialScore != null && initialScore >= 80)
-
+    const bestPassed = passed || (initialScore != null && initialScore >= quiz.pass_score)
     await supabase.from('lesson_progress').upsert({
       profile_id: profileId,
       course_key: courseId,
@@ -1097,83 +1249,200 @@ function QuizPlayer({
       quiz_score: bestScore,
       quiz_passed: bestPassed,
       completed: bestPassed,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     }, { onConflict: 'profile_id,course_key,lesson_key' })
 
     setResultPct(pct)
     setResultPassed(passed)
-    if (passed) onCompleted()
+
+    if (passed) { onCompleted(); setPhase('result'); return }
+
+    const fc = await getFreshAttemptCount(quiz.id)
+    setFreshCount(fc)
+    if (fc >= quiz.max_attempts) {
+      await supabase.from('course_locks').upsert({
+        profile_id: profileId,
+        course_id: courseId,
+        reason: `Exceeded maximum attempts (${quiz.max_attempts}) for "${quiz.title}"`,
+        locked_at: now,
+        locked_by: 'system',
+        is_locked: true,
+        unlocked_at: null,
+        unlocked_by: null,
+      }, { onConflict: 'profile_id,course_id' })
+      setPhase('locked_out')
+      onCourseLocked()
+      return
+    }
+
     setPhase('result')
   }
 
+  if (phase === 'loading') return (
+    <div className="screen-container">
+      <div className="back-nav"><button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button></div>
+      <div className="loading-state">Loading quiz…</div>
+    </div>
+  )
+
+  if (phase === 'no_quiz') return (
+    <div className="screen-container">
+      <div className="back-nav"><button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button></div>
+      <div className="quiz-start-card">
+        <div className="quiz-start-icon">📝</div>
+        <h2>No Quiz Available</h2>
+        <p style={{ color: 'var(--muted)', textAlign: 'center' }}>No quiz has been assigned to this lesson yet.</p>
+        <button className="btn btn-outline" onClick={onBack}>Back to Course</button>
+      </div>
+    </div>
+  )
+
+  if (phase === 'locked_out') return (
+    <div className="screen-container">
+      <div className="back-nav"><button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button></div>
+      <div className="quiz-result-card">
+        <div className="quiz-result-icon fail">🔒</div>
+        <h2>Course Locked</h2>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', maxWidth: 400 }}>
+          You have used all {quiz?.max_attempts ?? 0} attempt{(quiz?.max_attempts ?? 0) !== 1 ? 's' : ''} without passing.
+          This course has been locked. Please contact your supervisor or educator to unlock it.
+        </p>
+        {attempts.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12, width: '100%', maxWidth: 360 }}>
+            {attempts.slice(0, 3).map((a, i) => (
+              <div key={a.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span>Attempt {attempts.length - i}</span>
+                <span style={{ fontWeight: 700, color: a.passed ? 'var(--green)' : 'var(--red)' }}>{a.score_pct}%</span>
+                <span style={{ color: 'var(--muted)' }}>{new Date(a.attempted_at).toLocaleDateString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <button className="btn btn-outline" onClick={onBack} style={{ marginTop: 16 }}>Back to Course</button>
+      </div>
+    </div>
+  )
+
   if (phase === 'start') {
-    const alreadyPassed = initialScore != null && initialScore >= 80
+    const alreadyPassed = initialScore != null && quiz != null && initialScore >= quiz.pass_score
+    const attemptsLeft = quiz ? quiz.max_attempts - freshCount : 0
+    const isReviewMode = courseCompleted
+
     return (
       <div className="screen-container">
-        <div className="back-nav">
-          <button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button>
-        </div>
+        <div className="back-nav"><button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button></div>
         <div className="quiz-start-card">
           <div className="quiz-start-icon">📝</div>
-          <h2>Knowledge Check Quiz</h2>
+          <h2>{isReviewMode ? 'Quiz Review' : (quiz?.title ?? 'Knowledge Check')}</h2>
           <p>{course?.title}</p>
           {initialScore != null && (
             <div className="quiz-prev-score">
-              Previous best: <strong style={{ color: alreadyPassed ? 'var(--green)' : 'var(--red)' }}>
+              Best score: <strong style={{ color: alreadyPassed ? 'var(--green)' : 'var(--red)' }}>
                 {initialScore}%
               </strong> {alreadyPassed ? '✅ Passed' : '❌ Not passed'}
             </div>
           )}
-          <div className="quiz-start-info">
-            <div className="quiz-info-item"><span>Questions</span><strong>{questions.length}</strong></div>
-            <div className="quiz-info-item"><span>Time Limit</span><strong>15 min</strong></div>
-            <div className="quiz-info-item"><span>Pass Score</span><strong>80%</strong></div>
-          </div>
-          <button className="btn btn-primary btn-lg" onClick={() => setPhase('quiz')}>
-            {alreadyPassed ? 'Retake Quiz' : 'Start Quiz'}
-          </button>
+          {quiz && (
+            <div className="quiz-start-info">
+              <div className="quiz-info-item"><span>Questions</span><strong>{questions.length}</strong></div>
+              <div className="quiz-info-item"><span>Time Limit</span><strong>{quiz.time_limit_min} min</strong></div>
+              <div className="quiz-info-item"><span>Pass Score</span><strong>{quiz.pass_score}%</strong></div>
+              {!isReviewMode && (
+                <div className="quiz-info-item">
+                  <span>Attempts Left</span>
+                  <strong style={{ color: attemptsLeft <= 1 ? 'var(--red)' : 'var(--text)' }}>{attemptsLeft}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isReviewMode && lastAnswers.length > 0 ? (
+            <>
+              <div className="quiz-result-review" style={{ textAlign: 'left', width: '100%', marginTop: 16 }}>
+                {questions.map((q, i) => {
+                  const chosen = lastAnswers[i] ?? -1
+                  const correct = chosen === q.correct_answer
+                  return (
+                    <div key={q.id} className={`quiz-review-item ${correct ? 'correct' : 'incorrect'}`}>
+                      <span>{correct ? '✅' : '❌'} Q{i + 1}:</span> {q.question}
+                      <div className="quiz-review-answer">
+                        Your answer: <em>{q.options[chosen] ?? 'Not answered'}</em>
+                      </div>
+                      {!correct && (
+                        <div className="quiz-review-correct">Correct answer: <em>{q.options[q.correct_answer]}</em></div>
+                      )}
+                      {q.explanation && (
+                        <div style={{ marginTop: 4, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                          {q.explanation}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <button className="btn btn-outline" onClick={onBack} style={{ marginTop: 8 }}>Back to Course</button>
+            </>
+          ) : (
+            <button
+              className="btn btn-primary btn-lg"
+              onClick={() => { setAnswers({}); setQIdx(0); setTimeLeft((quiz?.time_limit_min ?? 15) * 60); setPhase('quiz') }}
+              disabled={questions.length === 0}
+            >
+              {alreadyPassed ? 'Retake Quiz' : 'Start Quiz'}
+            </button>
+          )}
         </div>
       </div>
     )
   }
 
   if (phase === 'result') {
-    const correct = questions.filter((q, i) => answers[i] === q.correct).length
+    const correct = questions.filter((q, i) => lastAnswers[i] === q.correct_answer).length
+    const attemptsLeft = quiz ? quiz.max_attempts - freshCount : 0
+
     return (
       <div className="screen-container">
-        <div className="back-nav">
-          <button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button>
-        </div>
+        <div className="back-nav"><button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button></div>
         <div className="quiz-result-card">
           <div className={`quiz-result-icon ${resultPassed ? 'pass' : 'fail'}`}>
             {resultPassed ? '🎉' : '😔'}
           </div>
           <h2>{resultPassed ? 'Quiz Passed!' : 'Quiz Failed'}</h2>
           <div className="quiz-result-score">{resultPct}%</div>
-          <p>{correct} out of {questions.length} correct</p>
+          <p>{correct} out of {questions.length} correct · Pass score: {quiz?.pass_score ?? 80}%</p>
           {resultPassed
             ? <p className="quiz-pass-msg">Congratulations! You have passed this quiz.</p>
-            : <p className="quiz-fail-msg">You need 80% to pass. Please review and try again.</p>}
+            : (
+              <p className="quiz-fail-msg">
+                You need {quiz?.pass_score ?? 80}% to pass.
+                {attemptsLeft > 0 ? ` You have ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.` : ' No attempts remaining.'}
+              </p>
+            )}
           <div className="quiz-result-review">
-            {questions.map((q, i) => (
-              <div key={i} className={`quiz-review-item ${answers[i] === q.correct ? 'correct' : 'incorrect'}`}>
-                <span>{answers[i] === q.correct ? '✅' : '❌'} Q{i + 1}:</span> {q.q}
-                <div className="quiz-review-answer">
-                  Your answer: <em>{q.opts[answers[i]] ?? 'Not answered'}</em>
+            {questions.map((q, i) => {
+              const chosen = lastAnswers[i] ?? -1
+              const correct = chosen === q.correct_answer
+              return (
+                <div key={q.id} className={`quiz-review-item ${correct ? 'correct' : 'incorrect'}`}>
+                  <span>{correct ? '✅' : '❌'} Q{i + 1}:</span> {q.question}
+                  <div className="quiz-review-answer">Your answer: <em>{q.options[chosen] ?? 'Not answered'}</em></div>
+                  {!correct && <div className="quiz-review-correct">Correct: <em>{q.options[q.correct_answer]}</em></div>}
+                  {q.explanation && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>{q.explanation}</div>
+                  )}
                 </div>
-                {answers[i] !== q.correct && (
-                  <div className="quiz-review-correct">Correct: <em>{q.opts[q.correct]}</em></div>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16 }}>
-            <button
-              className="btn btn-outline"
-              onClick={() => { setPhase('start'); setAnswers({}); setQIdx(0); setTimeLeft(900) }}
-            >
-              Retry
-            </button>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+            {!resultPassed && attemptsLeft > 0 && (
+              <button
+                className="btn btn-outline"
+                onClick={() => { setAnswers({}); setQIdx(0); setTimeLeft((quiz?.time_limit_min ?? 15) * 60); setPhase('quiz') }}
+              >
+                Try Again ({attemptsLeft} left)
+              </button>
+            )}
             <button className="btn btn-primary" onClick={onBack}>Back to Course</button>
           </div>
         </div>
@@ -1181,7 +1450,9 @@ function QuizPlayer({
     )
   }
 
+  // quiz phase
   const q = questions[qIdx]
+  if (!q) return null
   const mins = Math.floor(timeLeft / 60)
   const secs = timeLeft % 60
 
@@ -1200,9 +1471,9 @@ function QuizPlayer({
           </div>
         </div>
         <div className="quiz-question-card">
-          <p className="quiz-question-text">{q.q}</p>
+          <p className="quiz-question-text">{q.question}</p>
           <div className="quiz-options">
-            {q.opts.map((opt, oi) => (
+            {(q.options ?? []).map((opt, oi) => (
               <button
                 key={oi}
                 className={`quiz-option${answers[qIdx] === oi ? ' selected' : ''}`}
