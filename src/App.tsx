@@ -38,6 +38,7 @@ import NurseSearch from './screens/nurse/NurseSearch'
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [permissions, setPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [params, setParams] = useState<Record<string, string>>({})
@@ -45,6 +46,21 @@ export default function App() {
   const [modal, setModal] = useState<ModalConfig | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Fetch this role's permissions from custom_roles whenever the role changes.
+  // Runs in a plain useEffect — safe from the onAuthStateChange deadlock.
+  useEffect(() => {
+    if (!profile?.role) { setPermissions([]); return }
+    supabase
+      .from('custom_roles')
+      .select('permissions')
+      .eq('id', profile.role)
+      .maybeSingle()
+      .then(({ data }) => {
+        const p = data?.permissions
+        setPermissions(Array.isArray(p) ? p : [])
+      })
+  }, [profile?.role])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -142,7 +158,7 @@ export default function App() {
   const isNursePortal = ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'].includes(screen)
 
   return (
-    <AppContext.Provider value={{ profile, role, navigate, screen, params, toast, openModal, closeModal }}>
+    <AppContext.Provider value={{ profile, role, permissions, navigate, screen, params, toast, openModal, closeModal }}>
       <div className="app-shell">
         {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <Sidebar isNursePortal={isNursePortal} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
