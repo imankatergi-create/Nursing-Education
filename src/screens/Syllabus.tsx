@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 import type { Syllabus, CourseModule, Lesson, Material } from '../types'
@@ -18,6 +18,7 @@ export default function SyllabusScreen() {
   const [lessons, setLessons] = useState<Record<string, Lesson[]>>({})
   const [lessonMaterials, setLessonMaterials] = useState<Record<string, LessonMaterialRow[]>>({})
   const [loading, setLoading] = useState(false)
+  const loadCallRef = useRef(0)
 
   useEffect(() => {
     ;(async () => {
@@ -34,35 +35,60 @@ export default function SyllabusScreen() {
   }
 
   async function loadSyllabus(syl: Syllabus) {
+    const callId = ++loadCallRef.current
     setSelected(syl)
     setLoading(true)
+    setModules([])
+    setLessons({})
+    setLessonMaterials({})
+
     const { data: mods } = await supabase
       .from('course_modules')
       .select('*')
       .eq('syllabus_id', syl.id)
       .order('order_index')
+    if (callId !== loadCallRef.current) return
+
     const modList = (mods ?? []) as CourseModule[]
     setModules(modList)
+
+    if (modList.length === 0) { setLoading(false); return }
+
+    // Batch: fetch all lessons for all modules in one query
+    const modIds = modList.map(m => m.id)
+    const { data: allLessons } = await supabase
+      .from('lessons')
+      .select('*')
+      .in('module_id', modIds)
+      .order('order_index')
+    if (callId !== loadCallRef.current) return
+
+    const lessonList = (allLessons ?? []) as Lesson[]
     const lessonMap: Record<string, Lesson[]> = {}
+    for (const m of modList) lessonMap[m.id] = []
+    for (const l of lessonList) (lessonMap[l.module_id] ??= []).push(l)
+
+    // Batch: fetch all lesson_materials for all lessons in one query
     const materialMap: Record<string, LessonMaterialRow[]> = {}
-    for (const m of modList) {
-      const { data: ls } = await supabase
-        .from('lessons')
-        .select('*')
-        .eq('module_id', m.id)
+    const lessonIds = lessonList.map(l => l.id)
+    if (lessonIds.length > 0) {
+      const { data: allLm } = await supabase
+        .from('lesson_materials')
+        .select('lesson_id, required_watch_pct, duration_text, material_id, materials(*)')
+        .in('lesson_id', lessonIds)
         .order('order_index')
-      lessonMap[m.id] = (ls ?? []) as Lesson[]
-      for (const l of (ls ?? []) as Lesson[]) {
-        const { data: lm } = await supabase
-          .from('lesson_materials')
-          .select('required_watch_pct, duration_text, material_id, materials(*)')
-          .eq('lesson_id', l.id)
-          .order('order_index')
-        materialMap[l.id] = ((lm ?? []) as any[])
-          .map(r => ({ ...r.materials, _watch_pct: r.required_watch_pct ?? 100, _duration: r.duration_text ?? '' }))
-          .filter((r: any) => r?.id)
+      if (callId !== loadCallRef.current) return
+      for (const r of (allLm ?? []) as any[]) {
+        if (!r.materials?.id) continue
+        ;(materialMap[r.lesson_id] ??= []).push({
+          ...r.materials,
+          _watch_pct: r.required_watch_pct ?? 100,
+          _duration: r.duration_text ?? '',
+        })
       }
     }
+
+    if (callId !== loadCallRef.current) return
     setLessons(lessonMap)
     setLessonMaterials(materialMap)
     setLoading(false)
