@@ -10,8 +10,9 @@ const FALLBACK_STATUSES = ['in-progress', 'not-started', 'completed', 'overdue',
 const FALLBACK_PCTS = [65, 0, 100, 20, 40, 0]
 
 interface CourseProgress {
-  done: number
-  total: number
+  done: number       // fully completed lessons
+  inprog: number     // started but not completed
+  total: number      // always TOTAL_DEMO_LESSONS
 }
 
 export default function NurseCourses() {
@@ -28,15 +29,18 @@ export default function NurseCourses() {
   async function loadProgress() {
     const { data } = await supabase
       .from('lesson_progress')
-      .select('course_key, completed')
+      .select('course_key, completed, watch_pct, doc_acked, quiz_passed')
       .eq('profile_id', profile!.id)
     if (!data || data.length === 0) return
 
     const map: Record<string, CourseProgress> = {}
     for (const row of data) {
-      if (!map[row.course_key]) map[row.course_key] = { done: 0, total: 0 }
-      map[row.course_key].total++
-      if (row.completed) map[row.course_key].done++
+      if (!map[row.course_key]) map[row.course_key] = { done: 0, inprog: 0, total: TOTAL_DEMO_LESSONS }
+      if (row.completed) {
+        map[row.course_key].done++
+      } else if ((row.watch_pct ?? 0) > 0 || row.doc_acked || row.quiz_passed != null) {
+        map[row.course_key].inprog++
+      }
     }
     setCourseProgressMap(map)
   }
@@ -44,7 +48,7 @@ export default function NurseCourses() {
   function getCourseStatus(courseId: string, idx: number): string {
     const p = courseProgressMap[courseId]
     if (!p) return FALLBACK_STATUSES[idx % FALLBACK_STATUSES.length]
-    const pct = Math.round((p.done / TOTAL_DEMO_LESSONS) * 100)
+    const pct = getCoursePct(courseId, idx)
     if (pct >= 100) return 'completed'
     if (pct > 0) return 'in-progress'
     return 'not-started'
@@ -53,7 +57,9 @@ export default function NurseCourses() {
   function getCoursePct(courseId: string, idx: number): number {
     const p = courseProgressMap[courseId]
     if (!p) return FALLBACK_PCTS[idx % FALLBACK_PCTS.length]
-    return Math.round((p.done / TOTAL_DEMO_LESSONS) * 100)
+    // Completed lessons count as 1 each; in-progress count as 0.5
+    const effective = p.done + p.inprog * 0.5
+    return Math.min(100, Math.round((effective / TOTAL_DEMO_LESSONS) * 100))
   }
 
   const filtered = COURSES.filter((c, i) => {
