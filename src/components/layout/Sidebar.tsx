@@ -1,4 +1,5 @@
 import { useApp } from '../../context/AppContext'
+import { permissionsToScreens } from '../../App'
 import type { Screen } from '../../types'
 
 interface NavItem { icon: string; label: string; screen: Screen }
@@ -33,19 +34,13 @@ const NURSE_NAV: NavItem[] = [
   { icon: '🔍', label: 'Search', screen: 'nsearch' },
 ]
 
-const ROLE_SCREENS: Record<string, Screen[]> = {
-  nurse: ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'],
-  supervisor: ['dashboard','progress','reports','assignments','announcements','notifications','coverage'],
-  educator: ['dashboard','courses','syllabus','materials','quizzes','programs','assignments','progress','reports','announcements','notifications'],
-  director: ['dashboard','progress','reports','coverage','announcements','certificates','programs'],
-  it: ['dashboard','users','roles','depts','settings','audit','notifications'],
-  admin: ['dashboard','users','roles','depts','programs','courses','syllabus','materials','quizzes','assignments','progress','reports','notifications','announcements','certificates','feedback','audit','settings','coverage','cmssearch'],
-  superadmin: ['dashboard','users','roles','depts','programs','courses','syllabus','materials','quizzes','assignments','progress','reports','notifications','announcements','certificates','feedback','audit','settings','coverage','cmssearch'],
-}
-
 export default function Sidebar({ isNursePortal, open, onClose }: { isNursePortal: boolean; open: boolean; onClose: () => void }) {
-  const { screen, navigate, profile, role } = useApp()
-  const allowedScreens = ROLE_SCREENS[role] ?? []
+  const { screen, navigate, profile, role, permissions } = useApp()
+
+  const allowedScreens: Screen[] = permissions.length > 0
+    ? permissionsToScreens(permissions)
+    : []
+
   const navItems = (isNursePortal || role === 'nurse')
     ? NURSE_NAV
     : CMS_NAV.filter(n => allowedScreens.includes(n.screen))

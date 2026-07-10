@@ -36,8 +36,35 @@ import NurseCerts from './screens/nurse/NurseCerts'
 import NurseNotifs from './screens/nurse/NurseNotifs'
 import NurseSearch from './screens/nurse/NurseSearch'
 
+// Maps each permission string to the screens it unlocks
+const PERM_TO_SCREENS: Record<string, Screen[]> = {
+  'View Dashboard':       ['dashboard'],
+  'Manage Users':         ['users', 'assignments'],
+  'Manage Roles':         ['roles'],
+  'Manage Departments':   ['depts'],
+  'Create Programs':      ['programs'],
+  'Edit Programs':        ['programs'],
+  'Create Courses':       ['courses', 'syllabus', 'cmssearch'],
+  'Edit Courses':         ['courses', 'syllabus', 'cmssearch'],
+  'Upload Materials':     ['materials'],
+  'Create Quizzes':       ['quizzes'],
+  'View Reports':         ['reports', 'progress', 'coverage', 'feedback'],
+  'Export Reports':       ['reports'],
+  'Send Notifications':   ['notifications'],
+  'Create Announcements': ['announcements'],
+  'View Certificates':    ['certificates'],
+  'Issue Certificates':   ['certificates'],
+  'View Audit Log':       ['audit'],
+  'System Settings':      ['settings'],
+}
+
+export function permissionsToScreens(perms: string[]): Screen[] {
+  return Array.from(new Set(perms.flatMap(p => PERM_TO_SCREENS[p] ?? [])))
+}
+
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [permissions, setPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [params, setParams] = useState<Record<string, string>>({})
@@ -64,6 +91,12 @@ export default function App() {
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
+    if (data?.role) {
+      const { data: roleData } = await supabase
+        .from('custom_roles').select('permissions').eq('id', data.role).maybeSingle()
+      const raw = roleData?.permissions
+      setPermissions(Array.isArray(raw) ? raw : JSON.parse(raw ?? '[]'))
+    }
     if (data?.role === 'nurse') setScreen('ndash')
     setLoading(false)
   }
@@ -115,6 +148,25 @@ export default function App() {
         default: return <NurseDash />
       }
     }
+
+    // Access guard: derive allowed screens from permissions and block unauthorized access
+    if (role !== 'nurse' && permissions.length > 0) {
+      const allowed = permissionsToScreens(permissions)
+      if (!allowed.includes(screen)) {
+        return (
+          <div className="screen-container">
+            <div className="empty-state" style={{ marginTop: 80 }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Access Denied</div>
+              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+                Your role does not have permission to view this page.
+              </div>
+            </div>
+          </div>
+        )
+      }
+    }
+
     switch (screen) {
       case 'dashboard': return <Dashboard />
       case 'users': return <UsersScreen />
@@ -143,7 +195,7 @@ export default function App() {
   const isNursePortal = ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'].includes(screen)
 
   return (
-    <AppContext.Provider value={{ profile, role, navigate, screen, params, toast, openModal, closeModal }}>
+    <AppContext.Provider value={{ profile, role, permissions, navigate, screen, params, toast, openModal, closeModal }}>
       <div className="app-shell">
         {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <Sidebar isNursePortal={isNursePortal} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
