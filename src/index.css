@@ -329,6 +329,8 @@ a{color:var(--teal)}
 .module-header h3 { font-size: 13.5px; font-weight: 700; }
 .lessons-list { display: flex; flex-direction: column; }
 .lesson-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #ECF1F2; font-size: 13px; }
+.lesson-row-actions { margin-left: auto; display: flex; gap: 6px; }
+.module-actions { display: flex; gap: 6px; margin-left: auto; }
 .lesson-row:last-child { border-bottom: none; }
 .lesson-row.clickable { cursor: pointer; }
 .lesson-row.clickable:hover { background: var(--bg); }
@@ -363,6 +365,7 @@ a{color:var(--teal)}
 .questions-list { display: flex; flex-direction: column; gap: 12px; }
 .question-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 14px; }
 .question-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.question-actions { margin-left: auto; display: flex; gap: 6px; }
 .question-num { font-size: 11px; font-weight: 700; background: var(--teal-t); color: var(--teal); padding: 2px 8px; border-radius: 20px; }
 .question-pts { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--muted); }
 .question-text { font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }

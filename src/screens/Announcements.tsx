@@ -27,6 +27,12 @@ export default function AnnouncementsScreen() {
     })
   }
 
+  function openEdit(a: Announcement) {
+    openModal({ title: 'Edit Announcement', wide: true,
+      body: <AnnouncementForm initial={a} onSave={async d => { await supabase.from('announcements').update(d).eq('id', a.id); fetchAnnouncements(); closeModal(); toast('Announcement updated') }} />
+    })
+  }
+
   async function deleteAnnouncement(a: Announcement) {
     if (!confirm(`Delete announcement "${a.title}"?`)) return
     await supabase.from('announcements').delete().eq('id', a.id)
@@ -60,6 +66,7 @@ export default function AnnouncementsScreen() {
                 <span className="stat-chip"><strong>{a.sent_count}</strong> sent</span>
                 {a.require_confirmation && <span className="tag tag-amber">Confirmation Required</span>}
                 {a.send_email && <span className="tag tag-blue">Email</span>}
+                <button className="btn btn-sm btn-outline" onClick={() => openEdit(a)}>Edit</button>
                 <button className="btn btn-sm btn-danger" onClick={() => deleteAnnouncement(a)}>Delete</button>
               </div>
             </div>
@@ -73,11 +80,12 @@ export default function AnnouncementsScreen() {
   )
 }
 
-function AnnouncementForm({ onSave }: { onSave: (d: Partial<Announcement>) => void }) {
+function AnnouncementForm({ initial, onSave }: { initial?: Partial<Announcement>; onSave: (d: Partial<Announcement>) => void }) {
   const [form, setForm] = useState({
     title: '', body: '', audience_type: 'All Nurses', priority: 'normal',
     start_date: '', end_date: '', send_email: false, require_confirmation: false,
     sent_count: 0, created_by: 'Admin',
+    ...initial,
   })
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
   return (
@@ -106,7 +114,7 @@ function AnnouncementForm({ onSave }: { onSave: (d: Partial<Announcement>) => vo
           <label><input type="checkbox" checked={form.require_confirmation} onChange={e => set('require_confirmation', e.target.checked)} /> Require Confirmation</label>
         </div>
       </div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">Publish</button></div>
+      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">{initial ? 'Save Changes' : 'Publish'}</button></div>
     </form>
   )
 }

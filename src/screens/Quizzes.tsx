@@ -38,6 +38,24 @@ export default function QuizzesScreen() {
     })
   }
 
+  function openEditQuestion(q: QuizQuestion) {
+    if (!selected) return
+    openModal({ title: 'Edit Question', wide: true,
+      body: <QuestionForm initial={q} onSave={async d => {
+        await supabase.from('quiz_questions').update(d).eq('id', q.id)
+        loadQuiz(selected); closeModal(); toast('Question updated')
+      }} />
+    })
+  }
+
+  async function deleteQuestion(q: QuizQuestion) {
+    if (!selected) return
+    if (!confirm('Delete this question?')) return
+    await supabase.from('quiz_questions').delete().eq('id', q.id)
+    loadQuiz(selected)
+    toast('Question deleted')
+  }
+
   return (
     <div className="screen-container">
       <div className="screen-header">
@@ -77,6 +95,10 @@ export default function QuizzesScreen() {
                       <span className={`badge ${qTypeColor[q.type] ?? 'badge-gray'}`}>{q.type.toUpperCase()}</span>
                       <span className="badge badge-gray">{q.difficulty}</span>
                       <span className="question-pts">{q.points} pts</span>
+                      <div className="question-actions">
+                        <button className="btn btn-sm btn-outline" onClick={() => openEditQuestion(q)}>Edit</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => deleteQuestion(q)}>Delete</button>
+                      </div>
                     </div>
                     <p className="question-text">{q.question}</p>
                     {q.options?.length > 0 && (
@@ -119,8 +141,12 @@ export default function QuizzesScreen() {
   )
 }
 
-function QuestionForm({ onSave }: { onSave: (d: Partial<QuizQuestion>) => void }) {
-  const [form, setForm] = useState({ type: 'mcq', question: '', options: ['','','',''], correct_answer: 0, explanation: '', points: 1, difficulty: 'Medium' })
+function QuestionForm({ initial, onSave }: { initial?: Partial<QuizQuestion>; onSave: (d: Partial<QuizQuestion>) => void }) {
+  const [form, setForm] = useState(() => {
+    const base = { type: 'mcq', question: '', options: ['','','',''] as string[], correct_answer: 0 as number | number[] | string, explanation: '', points: 1, difficulty: 'Medium' }
+    if (!initial) return base
+    return { ...base, ...initial, options: initial.options?.length ? [...initial.options] : base.options }
+  })
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
   return (
     <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave({ ...form, accept_values: [] }) }}>
@@ -151,7 +177,7 @@ function QuestionForm({ onSave }: { onSave: (d: Partial<QuizQuestion>) => void }
         </div>
       )}
       <div className="form-group"><label>Explanation</label><textarea rows={2} value={form.explanation} onChange={e => set('explanation', e.target.value)} /></div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">Add Question</button></div>
+      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">{initial ? 'Save Changes' : 'Add Question'}</button></div>
     </form>
   )
 }

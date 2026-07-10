@@ -60,6 +60,24 @@ export default function SyllabusScreen() {
     })
   }
 
+  function openEditModule(mod: CourseModule) {
+    openModal({
+      title: 'Edit Module',
+      body: <ModuleForm initial={mod} onSave={async d => {
+        await supabase.from('course_modules').update(d).eq('id', mod.id)
+        if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Module updated')
+      }} />,
+    })
+  }
+
+  async function deleteModule(mod: CourseModule) {
+    if (!confirm(`Delete module "${mod.title}" and all its lessons?`)) return
+    await supabase.from('lessons').delete().eq('module_id', mod.id)
+    await supabase.from('course_modules').delete().eq('id', mod.id)
+    if (selectedCourse) loadCourse(selectedCourse)
+    toast('Module deleted')
+  }
+
   function openAddLesson(moduleId: string) {
     openModal({
       title: 'Add Lesson',
@@ -70,6 +88,24 @@ export default function SyllabusScreen() {
         if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson added')
       }} />,
     })
+  }
+
+  function openEditLesson(lesson: Lesson) {
+    openModal({
+      title: 'Edit Lesson',
+      wide: true,
+      body: <LessonForm initial={lesson} onSave={async d => {
+        await supabase.from('lessons').update(d).eq('id', lesson.id)
+        if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson updated')
+      }} />,
+    })
+  }
+
+  async function deleteLesson(lesson: Lesson) {
+    if (!confirm(`Delete lesson "${lesson.title}"?`)) return
+    await supabase.from('lessons').delete().eq('id', lesson.id)
+    if (selectedCourse) loadCourse(selectedCourse)
+    toast('Lesson deleted')
   }
 
   const typeIcon: Record<string, string> = { video: '🎬', doc: '📄', quiz: '❓', eval: '📝' }
@@ -102,7 +138,11 @@ export default function SyllabusScreen() {
             <div key={mod.id} className="module-block">
               <div className="module-header">
                 <h3>{mod.title}</h3>
-                <button className="btn btn-sm" onClick={() => openAddLesson(mod.id)}>+ Lesson</button>
+                <div className="module-actions">
+                  <button className="btn btn-sm" onClick={() => openAddLesson(mod.id)}>+ Lesson</button>
+                  <button className="btn btn-sm btn-outline" onClick={() => openEditModule(mod)}>Edit</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => deleteModule(mod)}>Delete</button>
+                </div>
               </div>
               <div className="lessons-list">
                 {(lessons[mod.id] ?? []).map(lesson => (
@@ -113,6 +153,10 @@ export default function SyllabusScreen() {
                       <span className="lesson-meta">{lesson.duration_text} · {lesson.requirement}</span>
                     </div>
                     <span className={`badge badge-${lesson.type === 'video' ? 'blue' : lesson.type === 'doc' ? 'teal' : lesson.type === 'quiz' ? 'amber' : 'purple'}`}>{lesson.type}</span>
+                    <div className="lesson-row-actions">
+                      <button className="btn btn-sm btn-outline" onClick={() => openEditLesson(lesson)}>Edit</button>
+                      <button className="btn btn-sm btn-danger" onClick={() => deleteLesson(lesson)}>Delete</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -124,24 +168,28 @@ export default function SyllabusScreen() {
   )
 }
 
-function ModuleForm({ onSave }: { onSave: (d: { title: string }) => void }) {
-  const [title, setTitle] = useState('')
+function ModuleForm({ initial, onSave }: { initial?: Partial<CourseModule>; onSave: (d: { title: string }) => void }) {
+  const [title, setTitle] = useState(initial?.title ?? '')
   return (
     <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave({ title }) }}>
       <div className="form-group"><label>Module Title</label><input value={title} onChange={e => setTitle(e.target.value)} required /></div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">Add</button></div>
+      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">{initial ? 'Save Changes' : 'Add'}</button></div>
     </form>
   )
 }
 
-function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
-  const [form, setForm] = useState<{
-    title: string; type: 'video'|'doc'|'quiz'|'eval'
-    duration_text: string; requirement: string
-    video_url: string; doc_url: string; doc_filename: string; quiz_id: string
-  }>({
-    title: '', type: 'video', duration_text: '', requirement: '',
-    video_url: '', doc_url: '', doc_filename: '', quiz_id: '',
+function LessonForm({ initial, onSave }: { initial?: Partial<Lesson>; onSave: (d: Partial<Lesson>) => void }) {
+  const [form, setForm] = useState(() => {
+    const base = { title: '', type: 'video' as 'video'|'doc'|'quiz'|'eval', duration_text: '', requirement: '', video_url: '', doc_url: '', doc_filename: '', quiz_id: '' }
+    if (!initial) return base
+    return {
+      ...base,
+      ...initial,
+      video_url: initial.video_url ?? '',
+      doc_url: initial.doc_url ?? '',
+      doc_filename: initial.doc_filename ?? '',
+      quiz_id: initial.quiz_id ?? '',
+    }
   })
 
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
@@ -246,7 +294,6 @@ function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
         />
       </div>
 
-      {/* ── Video content ── */}
       {form.type === 'video' && (
         <div className="form-section">
           <div className="form-section-label">Video Content</div>
@@ -267,7 +314,7 @@ function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
           </div>
           {!videoFile && (
             <div className="form-group">
-              <label>Or paste a video URL</label>
+              <label>{initial?.video_url ? 'Replace video URL' : 'Or paste a video URL'}</label>
               <input
                 type="url"
                 value={form.video_url}
@@ -279,7 +326,6 @@ function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
         </div>
       )}
 
-      {/* ── Document content ── */}
       {form.type === 'doc' && (
         <div className="form-section">
           <div className="form-section-label">Document Content</div>
@@ -300,7 +346,7 @@ function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
           </div>
           {!docFile && (
             <div className="form-group">
-              <label>Or paste a document URL</label>
+              <label>{initial?.doc_url ? 'Replace document URL' : 'Or paste a document URL'}</label>
               <input
                 type="url"
                 value={form.doc_url}
@@ -312,7 +358,6 @@ function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
         </div>
       )}
 
-      {/* ── Quiz content ── */}
       {form.type === 'quiz' && (
         <div className="form-section">
           <div className="form-section-label">Quiz</div>
@@ -333,7 +378,7 @@ function LessonForm({ onSave }: { onSave: (d: Partial<Lesson>) => void }) {
 
       <div className="modal-form-actions">
         <button type="submit" className="btn btn-primary" disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Add Lesson'}
+          {uploading ? 'Uploading…' : initial ? 'Save Changes' : 'Add Lesson'}
         </button>
       </div>
     </form>

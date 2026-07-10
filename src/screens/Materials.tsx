@@ -36,6 +36,12 @@ export default function MaterialsScreen() {
     })
   }
 
+  function openEdit(m: Material) {
+    openModal({ title: 'Edit Material', wide: true,
+      body: <MaterialForm initial={m} onSave={async d => { await supabase.from('materials').update(d).eq('id', m.id); fetchMaterials(); closeModal(); toast('Material updated') }} />
+    })
+  }
+
   async function deleteMaterial(m: Material) {
     if (!confirm(`Delete material "${m.title}"? This cannot be undone.`)) return
     if ((m as Material & { file_url?: string }).file_url) {
@@ -105,6 +111,7 @@ export default function MaterialsScreen() {
                         <button className="btn btn-sm" disabled>Preview</button>
                       )}
                       <button className="btn btn-sm btn-outline" onClick={() => openModal({ title: m.title, wide: true, body: <MaterialVersions material={m} /> })}>Versions</button>
+                      <button className="btn btn-sm btn-outline" onClick={() => openEdit(m)}>Edit</button>
                       <button className="btn btn-sm btn-danger" onClick={() => deleteMaterial(m)}>Delete</button>
                     </div>
                   </td>
@@ -129,8 +136,12 @@ function MaterialVersions({ material }: { material: Material }) {
   )
 }
 
-function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?: string }) => void }) {
-  const [form, setForm] = useState({ title: '', type: 'PDF', latest_version: 'v1.0', uploaded_by: '', mandatory: false, downloadable: true, tracking_rule: 'View only', completion_pct: 0, views: 0 })
+function MaterialForm({ initial, onSave }: { initial?: Partial<Material & { file_url?: string }>; onSave: (d: Partial<Material> & { file_url?: string }) => void }) {
+  const [form, setForm] = useState({
+    title: '', type: 'PDF', latest_version: 'v1.0', uploaded_by: '',
+    mandatory: false, downloadable: true, tracking_rule: 'View only', completion_pct: 0, views: 0,
+    ...initial,
+  })
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -144,8 +155,8 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    let file_url: string | undefined
-    let size_text: string | undefined
+    let file_url: string | undefined = initial?.file_url
+    let size_text: string | undefined = initial?.size_text
 
     if (file) {
       setUploading(true)
@@ -171,6 +182,9 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
             {['PDF','Video','PPT','Checklist','Protocol','Link/URL','Image','Audio'].map(t => <option key={t}>{t}</option>)}
           </select>
         </div>
+        <div className="form-group"><label>Version</label>
+          <input value={form.latest_version} onChange={e => set('latest_version', e.target.value)} placeholder="v1.0" />
+        </div>
         <div className="form-group"><label>Tracking Rule</label>
           <select value={form.tracking_rule} onChange={e => set('tracking_rule', e.target.value)}>
             <option>View only</option><option>Acknowledge read</option><option>Download required</option>
@@ -178,7 +192,7 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
         </div>
       </div>
 
-      <div className="form-section-title">File Upload</div>
+      <div className="form-section-label" style={{ marginTop: 4 }}>File</div>
       <div className="video-upload-area">
         {file ? (
           <div className="video-upload-selected">
@@ -189,12 +203,29 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
             </div>
             <button type="button" className="btn btn-sm btn-outline" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = '' }}>Remove</button>
           </div>
+        ) : initial?.file_url ? (
+          <div className="video-upload-selected">
+            <span className="video-upload-icon">📎</span>
+            <div className="video-upload-info">
+              <span className="video-upload-name">{initial.title}</span>
+              <span className="video-upload-meta">Current file — upload a new one to replace</span>
+            </div>
+          </div>
         ) : (
           <label className="video-upload-drop" htmlFor="material-file-input">
             <span className="video-upload-drop-icon">📁</span>
             <span className="video-upload-drop-text">Click to upload a file</span>
             <span className="video-upload-drop-hint">PDF, Video, PPT, Audio, Image — up to 100 MB</span>
             <input id="material-file-input" ref={fileRef} type="file" onChange={handleFile} style={{ display: 'none' }} />
+          </label>
+        )}
+        {!initial?.file_url && !file && (
+          <input ref={fileRef} type="file" onChange={handleFile} style={{ display: 'none' }} id="material-file-input" />
+        )}
+        {initial?.file_url && !file && (
+          <label style={{ cursor: 'pointer', marginTop: 8, display: 'inline-block' }}>
+            <span className="btn btn-sm btn-outline">Replace file</span>
+            <input type="file" ref={fileRef} onChange={handleFile} style={{ display: 'none' }} />
           </label>
         )}
         {uploadError && <div className="upload-error">{uploadError}</div>}
@@ -208,7 +239,7 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
       </div>
       <div className="modal-form-actions">
         <button type="submit" className="btn btn-primary" disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading ? 'Uploading…' : initial ? 'Save Changes' : 'Upload'}
         </button>
       </div>
     </form>
