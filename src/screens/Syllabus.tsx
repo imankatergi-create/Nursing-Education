@@ -330,7 +330,7 @@ function LessonForm({
           No materials in library yet. Upload materials first from the Materials screen.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', paddingRight: 2 }}>
           {allMaterials.map(m => {
             const sel = selectedIds.has(m.id)
             const cfg = matConfigs[m.id] ?? { watch_pct: 100, duration_text: '' }
@@ -338,45 +338,76 @@ function LessonForm({
               <div
                 key={m.id}
                 style={{
-                  border: `1.5px solid ${sel ? 'var(--primary)' : 'var(--border)'}`,
+                  border: `2px solid ${sel ? '#0891b2' : '#e2e8f0'}`,
                   borderRadius: 8,
                   overflow: 'hidden',
-                  background: sel ? 'color-mix(in srgb, var(--primary) 5%, transparent)' : 'var(--surface)',
-                  transition: 'border-color 0.15s',
+                  background: sel ? '#f0f9ff' : '#ffffff',
                 }}
               >
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={sel} onChange={() => toggleMat(m.id)} />
-                  <span style={{ fontSize: 16 }}>{typeIcon[m.type] ?? '📎'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{m.type}{m.size_text ? ` · ${m.size_text}` : ''}</div>
+                <div
+                  onClick={() => toggleMat(m.id)}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '20px 24px 1fr auto',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 14px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={sel}
+                    onChange={() => toggleMat(m.id)}
+                    onClick={e => e.stopPropagation()}
+                    style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#0891b2' }}
+                  />
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>{typeIcon[m.type] ?? '📎'}</span>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b' }}>{m.title}</div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                      {m.type}{m.size_text ? ` · ${m.size_text}` : ''}
+                    </div>
                   </div>
-                  {sel && <span className="badge badge-blue" style={{ fontSize: 11 }}>Selected</span>}
-                </label>
+                  {sel && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, padding: '2px 8px',
+                      background: '#0891b2', color: '#fff', borderRadius: 20,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      ✓ Selected
+                    </span>
+                  )}
+                </div>
                 {sel && (
-                  <div style={{ display: 'flex', gap: 12, padding: '0 12px 10px', background: 'var(--bg)' }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
+                    padding: '0 14px 12px', borderTop: '1px solid #e0f2fe',
+                    background: '#f8fafc',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         Required Watch %
-                      </label>
+                      </div>
                       <input
                         type="number" min={0} max={100}
                         value={cfg.watch_pct}
                         onChange={e => updateMatConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                        style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+                        onClick={e => e.stopPropagation()}
+                        style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#1e293b', background: '#fff' }}
                       />
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         Duration
-                      </label>
+                      </div>
                       <input
                         type="text"
                         value={cfg.duration_text}
                         placeholder="e.g. 10 min"
                         onChange={e => updateMatConfig(m.id, 'duration_text', e.target.value)}
-                        style={{ width: '100%', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+                        onClick={e => e.stopPropagation()}
+                        style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#1e293b', background: '#fff' }}
                       />
                     </div>
                   </div>
