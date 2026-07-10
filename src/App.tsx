@@ -47,48 +47,64 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Whenever the logged-in user's role changes, reload their permissions from
+  // custom_roles. This runs outside onAuthStateChange so there is no deadlock.
+  useEffect(() => {
+    if (!profile?.role) { setPermissions([]); return }
+    supabase
+      .from('custom_roles')
+      .select('permissions')
+      .eq('id', profile.role)
+      .maybeSingle()
+      .then(({ data: roleRow }) => {
+        const perms = roleRow?.permissions
+        setPermissions(Array.isArray(perms) ? perms : [])
+      })
+  }, [profile?.role])
+
   useEffect(() => {
     let profileChannel: ReturnType<typeof supabase.channel> | null = null
 
+    function setupRealtimeChannel(uid: string) {
+      if (profileChannel) supabase.removeChannel(profileChannel)
+      profileChannel = supabase
+        .channel(`profile:${uid}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
+          (payload) => {
+            // setProfile triggers the profile.role useEffect which reloads permissions.
+            setProfile(payload.new as Profile)
+          }
+        )
+        .subscribe()
+    }
+
+    // Initial session load — safe to call supabase here (outside the listener).
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) loadProfile(session.user.id)
-      else setLoading(false)
+      if (session?.user) {
+        loadProfile(session.user.id)
+        setupRealtimeChannel(session.user.id)
+      } else {
+        setLoading(false)
+      }
     })
 
+    // Subsequent sign-in / sign-out events.
+    // NEVER call supabase.from() directly inside this callback — it causes a
+    // deadlock (Supabase auth lock held). Defer with setTimeout to break out.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      ;(async () => {
+      setTimeout(() => {
         if (session?.user) {
-          await loadProfile(session.user.id)
-
-          // Subscribe to real-time changes on own profile row so role/status
-          // updates by an admin are reflected without requiring a re-login.
-          if (profileChannel) supabase.removeChannel(profileChannel)
-          profileChannel = supabase
-            .channel(`profile:${session.user.id}`)
-            .on(
-              'postgres_changes',
-              { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${session.user.id}` },
-              async (payload) => {
-                const updated = payload.new as Profile
-                setProfile(updated)
-                if (updated.role) {
-                  const { data: roleRow } = await supabase
-                    .from('custom_roles')
-                    .select('permissions')
-                    .eq('id', updated.role)
-                    .maybeSingle()
-                  const perms = roleRow?.permissions
-                  setPermissions(Array.isArray(perms) ? perms : [])
-                }
-              }
-            )
-            .subscribe()
+          loadProfile(session.user.id)
+          setupRealtimeChannel(session.user.id)
         } else {
           if (profileChannel) { supabase.removeChannel(profileChannel); profileChannel = null }
           setProfile(null)
+          setPermissions([])
           setLoading(false)
         }
-      })()
+      }, 0)
     })
 
     return () => {
@@ -100,21 +116,6 @@ export default function App() {
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
-
-    // Load this role's permissions from custom_roles so the sidebar
-    // reflects whatever the admin configured, not hardcoded lists.
-    if (data?.role) {
-      const { data: roleRow } = await supabase
-        .from('custom_roles')
-        .select('permissions')
-        .eq('id', data.role)
-        .maybeSingle()
-      const perms = roleRow?.permissions
-      setPermissions(Array.isArray(perms) ? perms : [])
-    } else {
-      setPermissions([])
-    }
-
     setScreen(data?.role === 'nurse' ? 'ndash' : 'dashboard')
     setLoading(false)
   }
