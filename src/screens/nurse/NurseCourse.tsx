@@ -28,6 +28,8 @@ export default function NurseCourse() {
   const [allLessonIds, setAllLessonIds] = useState<string[]>([])
   const [progressMap, setProgressMap] = useState<Record<string, LessonRow>>({})
   const [loadingProgress, setLoadingProgress] = useState(true)
+  const [hasFeedback, setHasFeedback] = useState(false)
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false)
 
   useEffect(() => {
     loadCourseData()
@@ -36,6 +38,15 @@ export default function NurseCourse() {
   useEffect(() => {
     if (allLessonIds.length > 0) loadProgress()
   }, [courseId, profileId, allLessonIds.length])
+
+  useEffect(() => {
+    supabase.from('feedback')
+      .select('id')
+      .eq('profile_id', profileId)
+      .eq('course_id', courseId)
+      .maybeSingle()
+      .then(({ data }) => setHasFeedback(!!data))
+  }, [courseId, profileId])
 
   async function loadCourseData() {
     const { data: c } = await supabase.from('courses').select('*').eq('id', courseId).maybeSingle()
@@ -157,6 +168,14 @@ export default function NurseCourse() {
 
   const backToCourse = () => navigate('ncourse', { courseId })
 
+  async function handleLessonCompleted() {
+    await loadProgress()
+    backToCourse()
+    if (!hasFeedback) {
+      setShowFeedbackModal(true)
+    }
+  }
+
   if (params.view === 'video') return (
     <VideoPlayer
       course={course}
@@ -165,7 +184,7 @@ export default function NurseCourse() {
       profileId={profileId}
       initialProgress={progressMap[params.lessonId ?? '']?.watch_pct ?? 0}
       onBack={backToCourse}
-      onCompleted={loadProgress}
+      onCompleted={handleLessonCompleted}
     />
   )
   if (params.view === 'doc') return (
@@ -176,7 +195,7 @@ export default function NurseCourse() {
       initialPage={progressMap[params.lessonId ?? '']?.doc_page ?? 1}
       initialAcked={progressMap[params.lessonId ?? '']?.doc_acked ?? false}
       onBack={backToCourse}
-      onCompleted={loadProgress}
+      onCompleted={handleLessonCompleted}
     />
   )
   if (params.view === 'quiz') return (
@@ -187,7 +206,7 @@ export default function NurseCourse() {
       profileId={profileId}
       initialScore={progressMap[params.lessonId ?? '']?.quiz_score ?? null}
       onBack={backToCourse}
-      onCompleted={loadProgress}
+      onCompleted={handleLessonCompleted}
     />
   )
 
@@ -201,6 +220,15 @@ export default function NurseCourse() {
 
   return (
     <div className="screen-container">
+      {showFeedbackModal && (
+        <FeedbackModal
+          courseId={courseId}
+          courseName={course?.title ?? ''}
+          profileId={profileId}
+          onClose={() => setShowFeedbackModal(false)}
+          onSubmitted={() => { setHasFeedback(true); setShowFeedbackModal(false) }}
+        />
+      )}
       <div className="back-nav">
         <button className="btn btn-sm btn-outline" onClick={() => navigate('ncourses')}>← Back to Courses</button>
       </div>
@@ -284,6 +312,134 @@ export default function NurseCourse() {
         {modules.length === 0 && !loadingProgress && (
           <div className="empty-state">No syllabus content yet for this course.</div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── FeedbackModal ───────────────────────────────────────────────────────────
+
+function FeedbackModal({
+  courseId, courseName, profileId, onClose, onSubmitted,
+}: {
+  courseId: string
+  courseName: string
+  profileId: string
+  onClose: () => void
+  onSubmitted: () => void
+}) {
+  const [courseRating, setCourseRating] = useState(0)
+  const [instructorRating, setInstructorRating] = useState(0)
+  const [materialsRating, setMaterialsRating] = useState(0)
+  const [relevanceRating, setRelevanceRating] = useState(0)
+  const [difficulty, setDifficulty] = useState('')
+  const [suggestions, setSuggestions] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleSubmit() {
+    if (!courseRating) return
+    setSubmitting(true)
+    await supabase.from('feedback').insert({
+      course_id: courseId,
+      course_name: courseName,
+      profile_id: profileId,
+      course_rating: courseRating,
+      instructor_rating: instructorRating || courseRating,
+      materials_rating: materialsRating || courseRating,
+      relevance_rating: relevanceRating || courseRating,
+      difficulty: difficulty || 'Just Right',
+      suggestions,
+      anonymous: false,
+      submitted_at: new Date().toISOString(),
+    })
+    setSubmitting(false)
+    onSubmitted()
+  }
+
+  function StarPicker({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+    const [hover, setHover] = useState(0)
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>{label}</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[1,2,3,4,5].map(i => (
+            <span
+              key={i}
+              style={{ fontSize: 28, cursor: 'pointer', color: i <= (hover || value) ? '#f59e0b' : 'var(--border)', transition: 'color 0.1s' }}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(0)}
+              onClick={() => onChange(i)}
+            >★</span>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 16, padding: 32,
+        maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>How was the lesson?</h2>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)' }}>{courseName}</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--muted)', lineHeight: 1, padding: '0 0 0 12px' }}>×</button>
+        </div>
+
+        <StarPicker label="Overall course rating *" value={courseRating} onChange={setCourseRating} />
+        <StarPicker label="Instructor effectiveness" value={instructorRating} onChange={setInstructorRating} />
+        <StarPicker label="Quality of materials" value={materialsRating} onChange={setMaterialsRating} />
+        <StarPicker label="Relevance to your role" value={relevanceRating} onChange={setRelevanceRating} />
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Difficulty level</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['Too Easy', 'Just Right', 'Too Hard'].map(d => (
+              <button
+                key={d}
+                onClick={() => setDifficulty(d)}
+                className={`btn btn-sm${difficulty === d ? ' btn-primary' : ' btn-outline'}`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+            Suggestions or comments <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(optional)</span>
+          </label>
+          <textarea
+            value={suggestions}
+            onChange={e => setSuggestions(e.target.value)}
+            placeholder="What could be improved? What did you find useful?"
+            rows={3}
+            style={{ width: '100%', resize: 'vertical', borderRadius: 8, border: '1px solid var(--border)', padding: '10px 12px', fontSize: 14, fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-outline" onClick={onClose}>Skip for now</button>
+          <button
+            className="btn btn-primary"
+            onClick={handleSubmit}
+            disabled={!courseRating || submitting}
+            style={{ opacity: !courseRating || submitting ? 0.6 : 1 }}
+          >
+            {submitting ? 'Submitting…' : 'Submit Feedback'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -532,7 +688,6 @@ interface LinkedMaterial {
   size_text: string
 }
 
-// Minimum seconds required before acknowledge unlocks (encourages reading)
 const MIN_READ_SECONDS = 30
 
 function DocViewer({
@@ -552,6 +707,11 @@ function DocViewer({
   const [acked, setAcked] = useState(initialAcked)
   const [loading, setLoading] = useState(true)
   const [secondsRead, setSecondsRead] = useState(0)
+  // Blob URL for doc/pdf viewer — bypasses Content-Disposition: attachment from storage
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [fetching, setFetching] = useState(false)
+  const [fetchError, setFetchError] = useState('')
+  const prevBlobRef = useRef<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -570,7 +730,49 @@ function DocViewer({
     load()
   }, [lessonId])
 
-  // Reading timer — counts up while user is on this view
+  // When the active material changes, fetch it as a blob to render inline
+  useEffect(() => {
+    const mat = materials[activeIdx]
+    if (!mat?.file_url) { setBlobUrl(null); return }
+
+    const ext = mat.file_url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+    const type = mat.type.toLowerCase()
+    const isNative = ['image','audio','video'].includes(type) ||
+      ['png','jpg','jpeg','gif','webp','svg','mp3','wav','ogg','m4a','mp4','webm','mov'].includes(ext)
+
+    if (isNative) {
+      setBlobUrl(mat.file_url)
+      return
+    }
+
+    // Fetch document as blob — this strips the Content-Disposition: attachment header
+    setFetching(true)
+    setFetchError('')
+    setBlobUrl(null)
+
+    fetch(mat.file_url)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.blob()
+      })
+      .then(blob => {
+        if (prevBlobRef.current) URL.revokeObjectURL(prevBlobRef.current)
+        const url = URL.createObjectURL(blob)
+        prevBlobRef.current = url
+        setBlobUrl(url)
+      })
+      .catch(err => setFetchError(`Could not load document: ${err.message}`))
+      .finally(() => setFetching(false))
+
+    return () => {
+      if (prevBlobRef.current) {
+        URL.revokeObjectURL(prevBlobRef.current)
+        prevBlobRef.current = null
+      }
+    }
+  }, [activeIdx, materials])
+
+  // Reading timer
   useEffect(() => {
     if (acked) return
     const t = setInterval(() => setSecondsRead(s => s + 1), 1000)
@@ -607,32 +809,52 @@ function DocViewer({
   }
 
   function renderViewer() {
-    if (!mat?.file_url) return null
-    const url = mat.file_url
-    const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+    if (!mat) return null
+
+    if (fetchError) {
+      return (
+        <div style={{ padding: '32px', textAlign: 'center', background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>⚠️</div>
+          <div style={{ color: 'var(--red)', marginBottom: 12, fontSize: 14 }}>{fetchError}</div>
+          {mat.file_url && (
+            <a href={mat.file_url} target="_blank" rel="noreferrer" className="btn btn-primary">
+              Open in new tab
+            </a>
+          )}
+        </div>
+      )
+    }
+
+    if (fetching || (!blobUrl && mat.file_url)) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 12, background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 32 }}>⏳</div>
+          <span style={{ color: 'var(--muted)', fontSize: 14 }}>Loading document…</span>
+        </div>
+      )
+    }
+
+    if (!blobUrl) return null
+
+    const ext = (mat.file_url ?? '').split('?')[0].split('.').pop()?.toLowerCase() ?? ''
     const type = mat.type.toLowerCase()
 
     if (type === 'image' || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)) {
-      return (
-        <img src={url} alt={mat.title} style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '0 auto', boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
-      )
+      return <img src={blobUrl} alt={mat.title} style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '0 auto', boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
     }
     if (type === 'audio' || ['mp3','wav','ogg','m4a'].includes(ext)) {
-      return <audio controls src={url} style={{ width: '100%' }} />
+      return <audio controls src={blobUrl} style={{ width: '100%' }} />
     }
     if (type === 'video' || ['mp4','webm','mov'].includes(ext)) {
-      return <video controls src={url} style={{ width: '100%', borderRadius: 8 }} />
+      return <video controls src={blobUrl} style={{ width: '100%', borderRadius: 8 }} />
     }
 
-    // PDF, PPT, Word, Protocol, Checklist, any other doc → Google Docs Viewer
-    const viewerUrl = `https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(url)}`
+    // PDF and all other document types — blob URL renders inline without download headers
     return (
       <iframe
-        key={viewerUrl}
-        src={viewerUrl}
+        src={blobUrl}
         title={mat.title}
-        style={{ width: '100%', height: 660, border: 'none', borderRadius: 8, display: 'block', background: '#fff' }}
-        allowFullScreen
+        style={{ width: '100%', height: 680, border: 'none', borderRadius: 8, display: 'block' }}
       />
     )
   }
@@ -678,7 +900,6 @@ function DocViewer({
           </div>
         ) : (
           <>
-            {/* Material info bar */}
             {mat && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: '1px solid var(--border)', marginBottom: 12 }}>
                 <span style={{ fontSize: 18 }}>{typeIcon[mat.type] ?? '📎'}</span>
@@ -691,8 +912,6 @@ function DocViewer({
                 )}
               </div>
             )}
-
-            {/* Document viewer */}
             {mat && renderViewer()}
           </>
         )}
@@ -701,55 +920,45 @@ function DocViewer({
       {/* ── Sticky acknowledgement bar ── */}
       {materials.length > 0 && (
         <div style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
+          position: 'fixed', bottom: 0, left: 0, right: 0,
           background: acked ? '#f0fdf4' : '#fff',
           borderTop: `2px solid ${acked ? 'var(--green)' : readyToAck ? 'var(--teal)' : 'var(--border)'}`,
           padding: '12px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
+          display: 'flex', alignItems: 'center', gap: 16,
           zIndex: 100,
           boxShadow: '0 -2px 12px rgba(0,0,0,0.08)',
           flexWrap: 'wrap',
         }}>
-          {/* Reading progress */}
           {!acked && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 200 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 180 }}>
               <span style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-                Reading: {secondsRead}s
+                {secondsRead}s read
               </span>
               <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
                 <div style={{
-                  height: '100%',
-                  width: `${readPct}%`,
+                  height: '100%', width: `${readPct}%`,
                   background: readyToAck ? 'var(--green)' : 'var(--teal)',
-                  borderRadius: 4,
-                  transition: 'width 0.5s ease',
+                  borderRadius: 4, transition: 'width 0.5s ease',
                 }} />
               </div>
-              <span style={{ fontSize: 12, color: readyToAck ? 'var(--green)' : 'var(--muted)', whiteSpace: 'nowrap', fontWeight: readyToAck ? 700 : 400 }}>
-                {readyToAck ? 'Ready' : `${MIN_READ_SECONDS - secondsRead}s left`}
+              <span style={{ fontSize: 12, color: readyToAck ? 'var(--green)' : 'var(--muted)', fontWeight: readyToAck ? 700 : 400, whiteSpace: 'nowrap' }}>
+                {readyToAck ? '✓ Ready' : `${MIN_READ_SECONDS - secondsRead}s left`}
               </span>
             </div>
           )}
-
           {acked ? (
             <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 14 }}>
-              ✅ Document acknowledged on {new Date().toLocaleDateString()}
+              ✅ Acknowledged on {new Date().toLocaleDateString()}
             </span>
           ) : (
             <>
               <span style={{ fontSize: 13, color: 'var(--text)' }}>
-                I have read and understood this document and will comply with all requirements.
+                I have read and understood this document.
               </span>
               <button
                 className="btn btn-primary"
                 onClick={handleAcknowledge}
-                style={{ flexShrink: 0, opacity: readyToAck ? 1 : 0.5 }}
-                title={readyToAck ? undefined : `Please read the document for ${MIN_READ_SECONDS - secondsRead} more seconds`}
+                style={{ flexShrink: 0, opacity: readyToAck ? 1 : 0.55 }}
               >
                 Acknowledge &amp; Complete
               </button>
