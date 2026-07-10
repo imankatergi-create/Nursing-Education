@@ -53,7 +53,7 @@ export default function NurseCourse() {
 
   useEffect(() => {
     loadProgress()
-  }, [courseId, profileId])
+  }, [courseId, profileId, params.view])
 
   async function loadProgress() {
     setLoadingProgress(true)
