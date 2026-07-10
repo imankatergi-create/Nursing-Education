@@ -359,11 +359,34 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
         return true
       })
       .filter(m => !search || m.title.toLowerCase().includes(search.toLowerCase()))
-      .map(m => ({ id: `mat-${m.id}`, title: m.title, subtitle: `${m.type}${m.size_text ? ` · ${m.size_text}` : ''}`, lessonType: materialToLessonType(m.type), matId: m.id, quizId: '' }))
+      .map(m => ({
+        id: `mat-${m.id}`,
+        title: m.title,
+        subtitle: [m.type, m.size_text, m.duration_text].filter(Boolean).join(' · '),
+        lessonType: materialToLessonType(m.type),
+        matId: m.id,
+        quizId: '',
+        // pre-fill from material metadata
+        materialDuration: m.duration_text ?? '',
+        materialReq: m.watch_pct_required != null && (m.type === 'Video' || m.type === 'Audio')
+          ? `Watch ${m.watch_pct_required}%`
+          : m.requires_acknowledgment
+            ? 'Acknowledge read'
+            : defaultRequirement[materialToLessonType(m.type)],
+      }))
 
     const quizItems = (tab === 'quiz' || tab === 'all')
       ? quizzes.filter(q => !search || q.title.toLowerCase().includes(search.toLowerCase()))
-          .map(q => ({ id: `quiz-${q.id}`, title: q.title, subtitle: `Quiz · Pass ${q.pass_score}% · ${q.time_limit_min} min`, lessonType: 'quiz' as const, matId: '', quizId: q.id }))
+          .map(q => ({
+            id: `quiz-${q.id}`,
+            title: q.title,
+            subtitle: `Quiz · Pass ${q.pass_score}% · ${q.time_limit_min} min`,
+            lessonType: 'quiz' as const,
+            matId: '',
+            quizId: q.id,
+            materialDuration: `${q.time_limit_min} min`,
+            materialReq: `Score ≥${q.pass_score}%`,
+          }))
       : []
 
     return [...matItems, ...quizItems]
@@ -372,7 +395,17 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
   function toggle(item: ReturnType<typeof getDisplayItems>[0]) {
     setSelected(prev => {
       if (prev[item.id]) { const n = { ...prev }; delete n[item.id]; return n }
-      return { ...prev, [item.id]: { materialId: item.matId || undefined, quizId: item.quizId || undefined, title: item.title, lessonType: item.lessonType, duration: '', requirement: defaultRequirement[item.lessonType] } }
+      return {
+        ...prev,
+        [item.id]: {
+          materialId: item.matId || undefined,
+          quizId: item.quizId || undefined,
+          title: item.title,
+          lessonType: item.lessonType,
+          duration: item.materialDuration || '',
+          requirement: item.materialReq || defaultRequirement[item.lessonType],
+        },
+      }
     })
   }
 

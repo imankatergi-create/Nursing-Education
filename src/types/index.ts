@@ -127,6 +127,10 @@ export interface Material {
   avg_time?: string
   completion_pct: number
   file_url?: string
+  duration_text?: string
+  watch_pct_required?: number
+  requires_acknowledgment?: boolean
+  description?: string
 }
 
 export interface MaterialVersion {
