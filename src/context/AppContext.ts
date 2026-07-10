@@ -11,6 +11,7 @@ export interface ModalConfig {
 export interface AppCtx {
   profile: Profile | null
   role: string
+  permissions: string[]
   navigate: (screen: Screen, params?: Record<string, string>) => void
   screen: Screen
   params: Record<string, string>
@@ -22,6 +23,7 @@ export interface AppCtx {
 export const AppContext = createContext<AppCtx>({
   profile: null,
   role: '',
+  permissions: [],
   navigate: () => {},
   screen: 'dashboard',
   params: {},

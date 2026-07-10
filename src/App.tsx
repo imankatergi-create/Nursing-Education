@@ -38,6 +38,7 @@ import NurseSearch from './screens/nurse/NurseSearch'
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [permissions, setPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [params, setParams] = useState<Record<string, string>>({})
@@ -67,7 +68,19 @@ export default function App() {
             .on(
               'postgres_changes',
               { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${session.user.id}` },
-              (payload) => setProfile(payload.new as Profile)
+              async (payload) => {
+                const updated = payload.new as Profile
+                setProfile(updated)
+                if (updated.role) {
+                  const { data: roleRow } = await supabase
+                    .from('custom_roles')
+                    .select('permissions')
+                    .eq('id', updated.role)
+                    .maybeSingle()
+                  const perms = roleRow?.permissions
+                  setPermissions(Array.isArray(perms) ? perms : [])
+                }
+              }
             )
             .subscribe()
         } else {
@@ -87,6 +100,21 @@ export default function App() {
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
+
+    // Load this role's permissions from custom_roles so the sidebar
+    // reflects whatever the admin configured, not hardcoded lists.
+    if (data?.role) {
+      const { data: roleRow } = await supabase
+        .from('custom_roles')
+        .select('permissions')
+        .eq('id', data.role)
+        .maybeSingle()
+      const perms = roleRow?.permissions
+      setPermissions(Array.isArray(perms) ? perms : [])
+    } else {
+      setPermissions([])
+    }
+
     setScreen(data?.role === 'nurse' ? 'ndash' : 'dashboard')
     setLoading(false)
   }
@@ -166,7 +194,7 @@ export default function App() {
   const isNursePortal = ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'].includes(screen)
 
   return (
-    <AppContext.Provider value={{ profile, role, navigate, screen, params, toast, openModal, closeModal }}>
+    <AppContext.Provider value={{ profile, role, permissions, navigate, screen, params, toast, openModal, closeModal }}>
       <div className="app-shell">
         {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <Sidebar isNursePortal={isNursePortal} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
