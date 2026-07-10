@@ -347,18 +347,15 @@ function LessonForm({
                 onClick={() => toggleMat(m.id)}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px' }}>
-                  {/* Custom checkbox — bypasses all native input CSS issues */}
-                  <div style={{
-                    width: 18, height: 18, minWidth: 18, minHeight: 18,
-                    border: `2px solid ${sel ? '#0891b2' : '#94a3b8'}`,
-                    borderRadius: 4,
-                    background: sel ? '#0891b2' : '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                    fontSize: 12, color: '#fff', fontWeight: 700, lineHeight: 1,
-                  }}>
-                    {sel ? '✓' : ''}
-                  </div>
+                  {/* SVG checkbox — immune to global CSS rules */}
+                  <svg width="18" height="18" viewBox="0 0 18 18" style={{ flexShrink: 0, display: 'block' }}>
+                    <rect x="1" y="1" width="16" height="16" rx="3"
+                      fill={sel ? '#0891b2' : '#fff'}
+                      stroke={sel ? '#0891b2' : '#94a3b8'}
+                      strokeWidth="2"
+                    />
+                    {sel && <path d="M4.5 9l3 3 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />}
+                  </svg>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', lineHeight: 1.3 }}>{m.title}</div>
                     <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
