@@ -524,8 +524,16 @@ function VideoPlayer({
 
 // ─── DocViewer ───────────────────────────────────────────────────────────────
 
+interface LinkedMaterial {
+  id: string
+  title: string
+  type: string
+  file_url: string | null
+  size_text: string
+}
+
 function DocViewer({
-  courseId, lessonId, profileId, initialPage, initialAcked, onBack, onCompleted,
+  courseId, lessonId, profileId, initialAcked, onBack, onCompleted,
 }: {
   courseId: string
   lessonId: string
@@ -535,42 +543,111 @@ function DocViewer({
   onBack: () => void
   onCompleted: () => void
 }) {
-  const [page, setPage] = useState(initialPage)
+  const [materials, setMaterials] = useState<LinkedMaterial[]>([])
+  const [lessonTitle, setLessonTitle] = useState('')
+  const [activeIdx, setActiveIdx] = useState(0)
   const [acked, setAcked] = useState(initialAcked)
-  const totalPages = 6
+  const [loading, setLoading] = useState(true)
 
-  const pageContent = [
-    { title: 'Introduction', body: 'This policy establishes the standard procedures for infection control and prevention in all clinical areas. All staff members are required to follow these guidelines to ensure patient and staff safety.' },
-    { title: 'Hand Hygiene Requirements', body: 'Hand hygiene must be performed: before and after patient contact, before invasive procedures, after exposure to body fluids, after contact with patient surroundings.' },
-    { title: 'Personal Protective Equipment', body: 'Appropriate PPE must be selected based on the anticipated exposure. Gloves, gowns, masks, and eye protection are available in all clinical areas.' },
-    { title: 'Isolation Precautions', body: 'Standard precautions apply to all patients. Transmission-based precautions (contact, droplet, airborne) are implemented based on the suspected or confirmed infectious agent.' },
-    { title: 'Environmental Cleaning', body: 'Patient care areas must be cleaned and disinfected regularly. High-touch surfaces require more frequent cleaning. Terminal cleaning is performed after patient discharge.' },
-    { title: 'Reporting Requirements', body: 'All healthcare-associated infections must be reported to the Infection Control department within 24 hours. Complete the incident report form and notify the charge nurse.' },
-  ]
+  useEffect(() => {
+    async function load() {
+      const [{ data: lesson }, { data: lm }] = await Promise.all([
+        supabase.from('lessons').select('title').eq('id', lessonId).maybeSingle(),
+        supabase
+          .from('lesson_materials')
+          .select('order_index, materials(id, title, type, file_url, size_text)')
+          .eq('lesson_id', lessonId)
+          .order('order_index'),
+      ])
+      setLessonTitle(lesson?.title ?? 'Document')
+      setMaterials((lm ?? []).map((r: any) => r.materials).filter(Boolean))
+      setLoading(false)
+    }
+    load()
+  }, [lessonId])
 
-  async function saveDocProgress(currentPage: number, acknowledged: boolean, completed: boolean) {
+  async function saveProgress(acknowledged: boolean, completed: boolean) {
     await supabase.from('lesson_progress').upsert({
       profile_id: profileId,
       course_key: courseId,
       lesson_key: lessonId,
       type: 'doc',
-      doc_page: currentPage,
-      doc_total_pages: totalPages,
+      doc_page: 1,
+      doc_total_pages: 1,
       doc_acked: acknowledged,
       completed,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'profile_id,course_key,lesson_key' })
   }
 
-  function goToPage(newPage: number) {
-    setPage(newPage)
-    saveDocProgress(newPage, acked, acked)
-  }
-
   async function handleAcknowledge() {
     setAcked(true)
-    await saveDocProgress(page, true, true)
+    await saveProgress(true, true)
     onCompleted()
+  }
+
+  const mat = materials[activeIdx] ?? null
+
+  const typeIcon: Record<string, string> = {
+    PDF: '📄', Video: '🎬', PPT: '📊', Checklist: '✅',
+    Protocol: '📋', 'Link/URL': '🔗', Image: '🖼️', Audio: '🎵',
+  }
+
+  function renderViewer() {
+    if (!mat?.file_url) return null
+    const url = mat.file_url
+    const type = mat.type
+
+    if (type === 'PDF') {
+      return (
+        <iframe
+          src={url}
+          title={mat.title}
+          className="doc-iframe"
+          style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
+        />
+      )
+    }
+    if (type === 'Image') {
+      return (
+        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+          <img src={url} alt={mat.title} style={{ maxWidth: '100%', maxHeight: 560, borderRadius: 8, boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
+        </div>
+      )
+    }
+    if (type === 'Audio') {
+      return (
+        <div style={{ padding: '24px 0' }}>
+          <audio controls src={url} style={{ width: '100%' }} />
+        </div>
+      )
+    }
+    if (type === 'Video') {
+      return (
+        <div style={{ padding: '16px 0' }}>
+          <video controls src={url} style={{ width: '100%', borderRadius: 8 }} />
+        </div>
+      )
+    }
+    // PPT, Protocol, Checklist, Link/URL, other — open in new tab
+    return (
+      <div style={{ padding: '32px', textAlign: 'center', background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>{typeIcon[type] ?? '📎'}</div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{mat.title}</div>
+        {mat.size_text && <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>{mat.size_text}</div>}
+        <a href={url} target="_blank" rel="noreferrer" className="btn btn-primary">
+          Open {type}
+        </a>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="screen-container">
+        <div className="loading-state">Loading document…</div>
+      </div>
+    )
   }
 
   return (
@@ -580,49 +657,61 @@ function DocViewer({
       </div>
       <div className="doc-viewer-wrap">
         <div className="doc-viewer-header">
-          <h3>Infection Control Policy IC-P-04</h3>
-          <div className="doc-page-nav">
-            <button className="btn btn-sm" onClick={() => goToPage(Math.max(1, page - 1))} disabled={page === 1}>
-              ‹ Prev
-            </button>
-            <span>Page {page} of {totalPages}</span>
-            <button className="btn btn-sm" onClick={() => goToPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}>
-              Next ›
-            </button>
-          </div>
-        </div>
-
-        <div className="doc-page">
-          <h2 className="doc-page-title">{pageContent[page - 1].title}</h2>
-          <p className="doc-page-body">{pageContent[page - 1].body}</p>
-          {page === 1 && (
-            <div className="doc-meta">
-              <span><strong>Document No:</strong> IC-P-04</span>
-              <span><strong>Version:</strong> 3.2</span>
-              <span><strong>Last Updated:</strong> 2025-01-01</span>
-              <span><strong>Department:</strong> Infection Control</span>
+          <h3>{lessonTitle}</h3>
+          {materials.length > 1 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {materials.map((m, i) => (
+                <button
+                  key={m.id}
+                  className={`btn btn-sm${activeIdx === i ? ' btn-primary' : ' btn-outline'}`}
+                  onClick={() => setActiveIdx(i)}
+                >
+                  {typeIcon[m.type] ?? '📎'} {m.title}
+                </button>
+              ))}
             </div>
           )}
         </div>
 
-        <div className="doc-progress-bar-wrap">
-          <div className="bar-track">
-            <div className="bar-fill" style={{ width: `${(page / totalPages) * 100}%` }} />
+        {materials.length === 0 ? (
+          <div className="empty-state" style={{ padding: '48px 24px' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📄</div>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>No document attached yet</div>
+            <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+              An educator hasn't linked a material to this lesson. Check back later.
+            </div>
           </div>
-          <span>{Math.round((page / totalPages) * 100)}% read</span>
-        </div>
+        ) : (
+          <>
+            {mat && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: 18 }}>{typeIcon[mat.type] ?? '📎'}</span>
+                  <span style={{ fontWeight: 600 }}>{mat.title}</span>
+                  {mat.size_text && <span style={{ color: 'var(--muted)', fontSize: 13 }}>{mat.size_text}</span>}
+                  {mat.file_url && (
+                    <a href={mat.file_url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline" style={{ marginLeft: 'auto' }}>
+                      Open in new tab
+                    </a>
+                  )}
+                </div>
+                {renderViewer()}
+              </div>
+            )}
 
-        {page === totalPages && !acked && (
-          <div className="doc-ack-box">
-            <p>I have read and understood this document and will comply with all requirements.</p>
-            <button className="btn btn-primary" onClick={handleAcknowledge}>✅ Acknowledge</button>
-          </div>
-        )}
-
-        {acked && (
-          <div className="doc-acked">
-            ✅ Document acknowledged on {new Date().toLocaleDateString()}
-          </div>
+            {!acked ? (
+              <div className="doc-ack-box">
+                <p>I confirm I have read and understood this material and will comply with all requirements.</p>
+                <button className="btn btn-primary" onClick={handleAcknowledge}>
+                  Acknowledge & Complete
+                </button>
+              </div>
+            ) : (
+              <div className="doc-acked">
+                Document acknowledged on {new Date().toLocaleDateString()}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
