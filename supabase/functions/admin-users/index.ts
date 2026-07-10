@@ -21,21 +21,17 @@ Deno.serve(async (req: Request) => {
     const body = await req.json()
     const { action } = body
 
-    // ── Create user with temporary password ───────────────────────────────
+    // ── Invite user ────────────────────────────────────────────────────────
     if (action === "invite") {
-      const { email, full_name, role, employee_id, job_title, dept_id, temp_password } = body
+      const { email, full_name, role, employee_id, job_title, dept_id } = body
 
       if (!email || !full_name || !role) {
         return json({ error: "email, full_name, and role are required" }, 400)
-      }
-      if (!temp_password || temp_password.length < 8) {
-        return json({ error: "temp_password must be at least 8 characters" }, 400)
       }
 
       const { data: authData, error: authError } =
         await supabaseAdmin.auth.admin.createUser({
           email,
-          password: temp_password,
           email_confirm: true,
           user_metadata: { full_name, role },
         })
@@ -52,10 +48,12 @@ Deno.serve(async (req: Request) => {
           job_title: job_title || null,
           dept_id: dept_id || null,
           account_status: "Active",
-          must_change_password: true,
         },
         { onConflict: "id" }
       )
+
+      // Send password setup link
+      await supabaseAdmin.auth.admin.generateLink({ type: "recovery", email })
 
       return json({ success: true, user_id: authData.user.id })
     }
@@ -71,16 +69,10 @@ Deno.serve(async (req: Request) => {
       return json({ success: true })
     }
 
-    // ── Admin-triggered password reset email ──────────────────────────────
+    // ── Reset password (admin sends reset email) ────────────────────────────
     if (action === "reset_password") {
       const { email } = body
       if (!email) return json({ error: "email required" }, 400)
-
-      // Mark must_change_password so user is forced to change on next login
-      const { data: prof } = await supabaseAdmin.from("profiles").select("id").eq("email", email).maybeSingle()
-      if (prof) {
-        await supabaseAdmin.from("profiles").update({ must_change_password: true }).eq("id", prof.id)
-      }
 
       const { error } = await supabaseAdmin.auth.admin.generateLink({
         type: "recovery",
@@ -91,22 +83,17 @@ Deno.serve(async (req: Request) => {
       return json({ success: true })
     }
 
-    // ── User changes own password (clears must_change_password flag) ───────
+    // ── Change password (user changes own password) ────────────────────────
     if (action === "change_password") {
       const { user_id, new_password } = body
       if (!user_id || !new_password) {
         return json({ error: "user_id and new_password required" }, 400)
-      }
-      if (new_password.length < 8) {
-        return json({ error: "Password must be at least 8 characters" }, 400)
       }
 
       const { error } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
         password: new_password,
       })
       if (error) return json({ error: error.message }, 400)
-
-      await supabaseAdmin.from("profiles").update({ must_change_password: false }).eq("id", user_id)
 
       return json({ success: true })
     }

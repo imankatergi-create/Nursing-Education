@@ -745,20 +745,10 @@ a{color:var(--teal)}
   .dash-grid, .nurse-dash-grid, .nurse-kpi-top { grid-template-columns: 1fr; }
   .certs-grid { grid-template-columns: 1fr 1fr; }
 
-  /* Multi-col grids that need to collapse */
-  .quiz-info-bar { grid-template-columns: repeat(2, 1fr); }
-  .video-stats { grid-template-columns: repeat(2, 1fr); }
-  .quiz-start-info { grid-template-columns: repeat(2, 1fr); }
-
   /* Forms */
   .form-row { grid-template-columns: 1fr; }
   .modal-box, .modal-wide { width: calc(100vw - 24px) !important; max-width: none !important; }
   .modal-overlay { padding: 12px; }
-
-  /* Nurse portal */
-  .nurse-progress-overview { flex-direction: column; align-items: center; gap: 12px; }
-  .nurse-welcome { flex-direction: column; gap: 8px; }
-  .nurse-welcome-date { text-align: left; }
 }
 
 /* ===== Mobile (≤600px) ===== */
@@ -778,9 +768,7 @@ a{color:var(--teal)}
   .action-btns { flex-wrap: wrap; gap: 4px; }
   .btn-sm { font-size: 11px; padding: 4px 8px; }
 
-  /* Bar chart rows — tighten label column */
-  .bar-row { grid-template-columns: 70px 1fr 48px; font-size: 11px; gap: 6px; }
-  .bar-value { font-size: 11px; }
+  .bar-row { grid-template-columns: 80px 1fr 60px; font-size: 11px; }
   .tab-row { flex-wrap: wrap; }
   .tab-btn { font-size: 12px; padding: 6px 10px; }
 
@@ -789,26 +777,6 @@ a{color:var(--teal)}
   .course-hero-icon { width: 52px; height: 52px; font-size: 22px; }
 
   .notif-dropdown { width: calc(100vw - 24px); right: -50px; }
-
-  /* 4-col grids → 2-col on small mobile */
-  .quiz-info-bar { grid-template-columns: repeat(2, 1fr); }
-  .video-stats { grid-template-columns: repeat(2, 1fr); }
-  .quiz-start-info { grid-template-columns: repeat(2, 1fr); }
-
-  /* Compliance donut + legend side by side */
-  .compliance-donut-wrap .donut-svg { width: 90px; height: 90px; }
-  .donut-value { font-size: 16px; }
-
-  /* Doc viewer */
-  .doc-page { padding: 16px; }
-
-  /* Table toolbar: stack on mobile */
-  .table-toolbar { flex-direction: column; align-items: stretch; }
-  .search-input { max-width: none; }
-
-  /* Screen header buttons: full width on mobile */
-  .screen-header > div:last-child { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
-  .screen-header > div:last-child .btn { flex: 1; justify-content: center; min-width: 80px; }
 }
 
 @media print { .sidebar, .topbar, .btn, .burger-btn { display: none !important; } }

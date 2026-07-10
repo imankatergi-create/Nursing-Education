@@ -5,7 +5,6 @@ import type { ModalConfig } from './context/AppContext'
 import type { Profile, Screen } from './types'
 
 import Login from './components/layout/Login'
-import ForceChangePassword from './components/layout/ForceChangePassword'
 import Sidebar from './components/layout/Sidebar'
 import TopBar from './components/layout/TopBar'
 
@@ -39,7 +38,6 @@ import NurseSearch from './screens/nurse/NurseSearch'
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [permissions, setPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [params, setParams] = useState<Record<string, string>>({})
@@ -48,39 +46,17 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Fetch this role's permissions from custom_roles whenever the role changes.
-  // Runs in a plain useEffect — safe from the onAuthStateChange deadlock.
   useEffect(() => {
-    if (!profile?.role) { setPermissions([]); return }
-    supabase
-      .from('custom_roles')
-      .select('permissions')
-      .eq('id', profile.role)
-      .maybeSingle()
-      .then(({ data }) => {
-        const p = data?.permissions
-        setPermissions(Array.isArray(p) ? p : [])
-      })
-  }, [profile?.role])
-
-  useEffect(() => {
-    // getSession is safe — runs outside the auth lock.
-    // Handles the "already logged in" case (persisted session).
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) loadProfile(session.user.id)
       else setLoading(false)
     })
 
-    // onAuthStateChange must NEVER call supabase.from() — doing so deadlocks
-    // because Supabase holds an internal auth lock during this callback.
-    // Fresh logins are handled by Login.tsx calling setProfile() directly,
-    // which triggers the permissions useEffect above. We only need sign-out here.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session?.user) {
-        setProfile(null)
-        setPermissions([])
-        setLoading(false)
-      }
+      ;(async () => {
+        if (session?.user) await loadProfile(session.user.id)
+        else { setProfile(null); setLoading(false) }
+      })()
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -88,7 +64,6 @@ export default function App() {
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
-    setScreen(data?.role === 'nurse' ? 'ndash' : 'dashboard')
     setLoading(false)
   }
 
@@ -107,11 +82,6 @@ export default function App() {
   const openModal = useCallback((config: ModalConfig) => setModal(config), [])
   const closeModal = useCallback(() => setModal(null), [])
 
-  const handleLogin = useCallback((prof: Profile) => {
-    setProfile(prof)
-    setScreen(prof.role === 'nurse' ? 'ndash' : 'dashboard')
-  }, [])
-
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'var(--bg)' }}>
       <div style={{ textAlign:'center' }}>
@@ -127,8 +97,7 @@ export default function App() {
     return <PasswordResetPage />
   }
 
-  if (!profile) return <Login onLogin={handleLogin} />
-  if (profile.must_change_password) return <ForceChangePassword profile={profile} onDone={setProfile} />
+  if (!profile) return <Login onLogin={setProfile} />
 
   const role = profile.role
 
@@ -173,7 +142,7 @@ export default function App() {
   const isNursePortal = ['ndash','ncourses','ncourse','ncerts','nnotifs','nsearch'].includes(screen)
 
   return (
-    <AppContext.Provider value={{ profile, role, permissions, navigate, screen, params, toast, openModal, closeModal }}>
+    <AppContext.Provider value={{ profile, role, navigate, screen, params, toast, openModal, closeModal }}>
       <div className="app-shell">
         {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <Sidebar isNursePortal={isNursePortal} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
