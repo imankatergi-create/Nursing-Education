@@ -541,6 +541,13 @@ a{color:var(--teal)}
 .video-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .video-play-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,.9); border: none; font-size: 22px; cursor: pointer; display: grid; place-items: center; }
 .video-complete-badge { position: absolute; top: 12px; right: 12px; background: var(--green); color: #fff; padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 700; }
+.video-click-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); transition: background .2s; cursor: pointer; }
+.video-click-overlay:hover { background: rgba(0,0,0,.35); }
+.video-big-play-btn { width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,.92); display: flex; align-items: center; justify-content: center; font-size: 26px; color: #111; padding-left: 4px; box-shadow: 0 4px 20px rgba(0,0,0,.3); transition: transform .15s; }
+.video-click-overlay:hover .video-big-play-btn { transform: scale(1.1); }
+.video-error-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.7); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-radius: 10px; }
+.video-error-icon { font-size: 32px; }
+.video-error-msg { color: #fff; font-size: 13px; text-align: center; max-width: 280px; line-height: 1.5; }
 .video-controls { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; }
 .video-progress-bar { height: 8px; background: #E7EEEF; border-radius: 6px; margin-bottom: 10px; overflow: hidden; }
 .video-progress-fill { height: 100%; background: var(--teal); border-radius: 6px; transition: width .3s; }

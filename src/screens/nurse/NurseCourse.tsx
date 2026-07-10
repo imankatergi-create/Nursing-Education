@@ -357,11 +357,12 @@ function VideoPlayer({
   const [pauses, setPauses] = useState(0)
   const [currentTime, setCurrentTime] = useState('0:00')
   const [totalTime, setTotalTime] = useState('0:00')
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const [videoReady, setVideoReady] = useState(false)
   const progressRef = useRef(progress)
   const alreadyCompleted = useRef(initialProgress >= 90)
   progressRef.current = progress
 
-  // resolvedUrl takes priority (material file_url), then lesson-level, then course-level
   const videoUrl = resolvedUrl ?? lesson?.video_url ?? course.video_url
   const hasRealVideo = Boolean(videoUrl)
 
@@ -372,12 +373,18 @@ function VideoPlayer({
     setProgress(pct)
     setCurrentTime(formatTime(el.currentTime))
     progressRef.current = pct
+    if (pct >= 90 && !alreadyCompleted.current) {
+      alreadyCompleted.current = true
+      saveVideoProgress(pct, true).then(onCompleted)
+    }
   }
 
   function onLoadedMetadata() {
     const el = videoRef.current
     if (!el) return
     setTotalTime(formatTime(el.duration))
+    setVideoReady(true)
+    setVideoError(null)
     if (initialProgress > 0 && initialProgress < 100) {
       el.currentTime = (initialProgress / 100) * el.duration
     }
@@ -396,6 +403,38 @@ function VideoPlayer({
     saveVideoProgress(100, true).then(onCompleted)
   }
 
+  function onVideoError() {
+    const el = videoRef.current
+    const code = el?.error?.code
+    const messages: Record<number, string> = {
+      1: 'Video loading was aborted.',
+      2: 'A network error occurred while loading the video.',
+      3: 'The video cannot be decoded.',
+      4: 'The video format is not supported or the URL is inaccessible.',
+    }
+    setVideoError(messages[code ?? 4] ?? 'Unable to load video. Check the URL or try again.')
+    setVideoReady(false)
+    setPlaying(false)
+  }
+
+  async function togglePlay() {
+    const el = videoRef.current
+    if (!el) return
+    if (el.paused) {
+      try {
+        await el.play()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (!message.includes('AbortError')) {
+          setVideoError(`Playback failed: ${message}`)
+        }
+      }
+    } else {
+      el.pause()
+    }
+  }
+
+  // Simulated progress for placeholder
   useEffect(() => {
     if (hasRealVideo) return
     let interval: ReturnType<typeof setInterval>
@@ -449,6 +488,13 @@ function VideoPlayer({
     setProgress(pct)
   }
 
+  function handleRestart() {
+    const el = videoRef.current
+    if (!el) return
+    el.currentTime = 0
+    el.pause()
+  }
+
   return (
     <div className="screen-container">
       <div className="back-nav">
@@ -456,7 +502,7 @@ function VideoPlayer({
       </div>
       <div className="video-player-wrap">
         {hasRealVideo ? (
-          <div className="video-screen real-video">
+          <div className="video-screen real-video" onClick={togglePlay}>
             <video
               ref={videoRef}
               src={videoUrl}
@@ -466,10 +512,31 @@ function VideoPlayer({
               onPlay={onPlay}
               onPause={onPause}
               onEnded={onEnded}
+              onError={onVideoError}
+              onCanPlay={() => setVideoReady(true)}
               playsInline
               preload="metadata"
             />
-            {progress >= 90 && <div className="video-complete-badge">✅ Watch requirement met</div>}
+            {/* Click-to-play overlay shown when not playing */}
+            {!playing && !videoError && (
+              <div className="video-click-overlay">
+                <div className="video-big-play-btn">▶</div>
+              </div>
+            )}
+            {videoError && (
+              <div className="video-error-overlay">
+                <div className="video-error-icon">⚠️</div>
+                <div className="video-error-msg">{videoError}</div>
+                <button
+                  className="btn btn-sm btn-outline"
+                  style={{ marginTop: 10, color: '#fff', borderColor: '#fff' }}
+                  onClick={e => { e.stopPropagation(); setVideoError(null); if (videoRef.current) { videoRef.current.load() } }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            {!videoError && progress >= 90 && <div className="video-complete-badge">✅ Watch requirement met</div>}
           </div>
         ) : (
           <div className="video-screen">
@@ -488,7 +555,15 @@ function VideoPlayer({
         <div className="video-controls">
           <div className="video-progress-bar" style={{ cursor: hasRealVideo ? 'pointer' : 'default' }}>
             {hasRealVideo ? (
-              <input type="range" className="video-seek-slider" min={0} max={100} value={progress} onChange={handleSeek} />
+              <input
+                type="range"
+                className="video-seek-slider"
+                min={0} max={100}
+                value={progress}
+                onChange={handleSeek}
+                onClick={e => e.stopPropagation()}
+                disabled={!videoReady}
+              />
             ) : (
               <div className="video-progress-fill" style={{ width: `${progress}%` }} />
             )}
@@ -496,11 +571,15 @@ function VideoPlayer({
           <div className="video-controls-row">
             {hasRealVideo ? (
               <>
-                <button className="btn btn-sm" onClick={() => playing ? videoRef.current?.pause() : videoRef.current?.play()}>
+                <button
+                  className="btn btn-sm"
+                  onClick={togglePlay}
+                  disabled={!!videoError}
+                >
                   {playing ? '⏸ Pause' : '▶ Play'}
                 </button>
                 <span className="video-time">{currentTime} / {totalTime}</span>
-                <button className="btn btn-sm btn-outline" onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; videoRef.current.pause() } }}>
+                <button className="btn btn-sm btn-outline" onClick={handleRestart} disabled={!videoReady}>
                   ⏮ Restart
                 </button>
               </>
