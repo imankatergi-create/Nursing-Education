@@ -3,6 +3,39 @@ import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 import type { Announcement } from '../types'
 
+async function sendAnnouncementNotifications(a: Partial<Announcement>) {
+  const audienceLower = (a.audience_type ?? '').toLowerCase()
+
+  // Determine target profiles: "all nurses" → nurses only; "all departments/staff/all" → everyone
+  let query = supabase.from('profiles').select('id, full_name')
+  if (audienceLower.includes('all department') || audienceLower.includes('all staff') || audienceLower.includes('everyone')) {
+    // Intentionally no role filter — broadcast to everyone
+  } else {
+    // Default: nurses
+    query = query.eq('role', 'nurse')
+  }
+
+  const { data: profiles } = await query
+  if (!profiles?.length) return 0
+
+  const channels = a.send_email ? 'Email + In-system' : 'In-system'
+  const snippet = (a.body ?? '').length > 100 ? (a.body ?? '').slice(0, 100) + '…' : (a.body ?? '')
+
+  await supabase.from('notifications').insert(
+    profiles.map(p => ({
+      profile_id: p.id,
+      recipient_name: p.full_name,
+      type: 'Announcement',
+      message: `${a.title}: ${snippet}`,
+      channels,
+      sent_at: new Date().toISOString(),
+      read: false,
+    }))
+  )
+
+  return profiles.length
+}
+
 export default function AnnouncementsScreen() {
   const { toast, openModal, closeModal } = useApp()
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
@@ -21,7 +54,14 @@ export default function AnnouncementsScreen() {
 
   function openCreate() {
     openModal({ title: 'Create Announcement', wide: true,
-      body: <AnnouncementForm onSave={async d => { await supabase.from('announcements').insert(d); fetchAnnouncements(); closeModal(); toast('Announcement published') }} />
+      body: <AnnouncementForm onSave={async d => {
+        // Insert announcement first so we get the sent_count right
+        const notifCount = await sendAnnouncementNotifications(d)
+        await supabase.from('announcements').insert({ ...d, sent_count: notifCount })
+        fetchAnnouncements()
+        closeModal()
+        toast(`Announcement published · ${notifCount} notification${notifCount !== 1 ? 's' : ''} sent`)
+      }} />
     })
   }
 
@@ -77,15 +117,16 @@ function AnnouncementForm({ onSave }: { onSave: (d: Partial<Announcement>) => vo
     start_date: '', end_date: '', send_email: false, require_confirmation: false,
     sent_count: 0, created_by: 'Admin',
   })
+  const [saving, setSaving] = useState(false)
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
   return (
-    <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave(form) }}>
+    <form className="modal-form" onSubmit={async e => { e.preventDefault(); setSaving(true); await onSave(form); setSaving(false) }}>
       <div className="form-group"><label>Title</label><input value={form.title} onChange={e => set('title', e.target.value)} required /></div>
       <div className="form-group"><label>Body</label><textarea rows={4} value={form.body} onChange={e => set('body', e.target.value)} required /></div>
       <div className="form-row">
         <div className="form-group"><label>Audience</label>
           <select value={form.audience_type} onChange={e => set('audience_type', e.target.value)}>
-            <option>All Nurses</option><option>Department</option><option>Unit</option><option>Role</option>
+            <option>All Nurses</option><option>All Departments</option><option>Department</option><option>Unit</option><option>Role</option>
           </select>
         </div>
         <div className="form-group"><label>Priority</label>
@@ -104,7 +145,11 @@ function AnnouncementForm({ onSave }: { onSave: (d: Partial<Announcement>) => vo
           <label><input type="checkbox" checked={form.require_confirmation} onChange={e => set('require_confirmation', e.target.checked)} /> Require Confirmation</label>
         </div>
       </div>
-      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">Publish</button></div>
+      <div className="modal-form-actions">
+        <button type="submit" className="btn btn-primary" disabled={saving}>
+          {saving ? 'Publishing…' : 'Publish & Notify'}
+        </button>
+      </div>
     </form>
   )
 }
