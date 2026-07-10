@@ -763,6 +763,10 @@ a{color:var(--teal)}
   .dash-grid, .nurse-dash-grid, .nurse-kpi-top { grid-template-columns: 1fr; }
   .certs-grid { grid-template-columns: 1fr 1fr; }
 
+  /* Nurse welcome banner */
+  .nurse-welcome { flex-direction: column; gap: 10px; }
+  .nurse-welcome-date { text-align: left; }
+
   /* Forms */
   .form-row { grid-template-columns: 1fr; }
   .modal-box, .modal-wide { width: calc(100vw - 24px) !important; max-width: none !important; }
@@ -774,8 +778,11 @@ a{color:var(--teal)}
   .topbar-center { display: none; }
   .content { padding: 12px; }
 
-  .kpi-grid, .nurse-kpi-grid { grid-template-columns: 1fr 1fr; }
-  .kpi-card { padding: 12px 10px; }
+  /* KPI cards: push delta to its own row so value/label aren't squeezed */
+  .kpi-grid, .nurse-kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi-card { padding: 12px 10px; flex-wrap: wrap; gap: 8px; }
+  .kpi-body { flex: 1; min-width: 0; }
+  .kpi-delta { width: 100%; margin-left: 0; font-size: 10px; padding-top: 0; }
   .kpi-value { font-size: 22px; }
 
   .programs-grid, .courses-grid, .nurse-courses-grid,
@@ -786,7 +793,25 @@ a{color:var(--teal)}
   .action-btns { flex-wrap: wrap; gap: 4px; }
   .btn-sm { font-size: 11px; padding: 4px 8px; }
 
-  .bar-row { grid-template-columns: 80px 1fr 60px; font-size: 11px; }
+  /* Bar chart: tighter label + value columns */
+  .bar-row { grid-template-columns: 68px 1fr 36px; font-size: 11px; gap: 6px; }
+  .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-value { font-size: 11px; text-align: right; }
+
+  /* Activity list: let time wrap gracefully */
+  .activity-item { flex-wrap: wrap; gap: 4px; padding: 10px 12px; }
+  .activity-body { width: 100%; order: 2; }
+  .activity-icon { order: 1; }
+  .activity-time { order: 3; font-size: 10px; width: 100%; padding-left: 22px; }
+
+  /* Course mini rows */
+  .course-mini-progress { min-width: 56px; font-size: 11px; }
+  .course-mini-row { padding: 8px 12px; }
+
+  /* Announcement cards: stack header on narrow screens */
+  .announcement-header { flex-direction: column; gap: 8px; }
+  .announcement-stats { flex-wrap: wrap; justify-content: flex-start; }
+
   .tab-row { flex-wrap: wrap; }
   .tab-btn { font-size: 12px; padding: 6px 10px; }
 
