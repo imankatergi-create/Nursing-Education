@@ -644,6 +644,25 @@ a{color:var(--teal)}
 .material-picker-title { font-size: 13px; font-weight: 500; color: var(--text); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .material-picker-subtitle { font-size: 11px; color: var(--muted); display: block; }
 .material-picker-footer { background: var(--bg); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); margin-bottom: 4px; }
+
+/* Picker bulk-apply bar */
+.picker-bulk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.picker-bulk-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); white-space: nowrap; }
+.picker-bulk-fields { display: flex; align-items: center; gap: 6px; flex: 1; flex-wrap: wrap; }
+.picker-bulk-input { flex: 1; min-width: 120px; padding: 5px 9px; font-size: 12px; border: 1.5px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+.picker-bulk-input:focus { outline: none; border-color: var(--teal); }
+
+/* Per-item configuration */
+.picker-items-config { display: flex; flex-direction: column; gap: 8px; }
+.picker-items-config-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.picker-item-row { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.picker-item-name { display: flex; align-items: center; gap: 6px; }
+.picker-item-title { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-item-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.picker-item-field-wrap { display: flex; flex-direction: column; gap: 3px; }
+.picker-item-field-wrap label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.picker-item-input { width: 100%; padding: 5px 8px; font-size: 12px; border: 1.5px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); box-sizing: border-box; }
+.picker-item-input:focus { outline: none; border-color: var(--teal); }
 .material-picker-selected-count { font-size: 13px; font-weight: 600; color: var(--teal); }
 .material-linked-tag { font-size: 10px; background: var(--teal-t); color: var(--teal); border-radius: 4px; padding: 1px 5px; margin-left: 6px; font-weight: 500; }
 

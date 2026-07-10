@@ -335,12 +335,13 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
   const [tab, setTab] = useState('all')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Record<string, PickerItem>>({})
-  const [sharedDuration, setSharedDuration] = useState('')
-  const [sharedReq, setSharedReq] = useState('')
+  // Bulk-apply fields
+  const [bulkDuration, setBulkDuration] = useState('')
+  const [bulkReq, setBulkReq] = useState('')
 
   useEffect(() => {
     Promise.all([
-      supabase.from('materials').select('id,title,type,size_text,file_url').order('title'),
+      supabase.from('materials').select('id,title,type,size_text,file_url,duration_text,watch_pct_required,requires_acknowledgment').order('title'),
       supabase.from('quizzes').select('id,title,pass_score,time_limit_min').order('title'),
     ]).then(([{ data: mats }, { data: qzs }]) => {
       setMaterials((mats ?? []) as Material[])
@@ -366,7 +367,6 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
         lessonType: materialToLessonType(m.type),
         matId: m.id,
         quizId: '',
-        // pre-fill from material metadata
         materialDuration: m.duration_text ?? '',
         materialReq: m.watch_pct_required != null && (m.type === 'Video' || m.type === 'Audio')
           ? `Watch ${m.watch_pct_required}%`
@@ -409,15 +409,41 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
     })
   }
 
+  function updateItem(id: string, field: 'duration' | 'requirement', value: string) {
+    setSelected(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }))
+  }
+
+  function applyToAll() {
+    if (!bulkDuration && !bulkReq) return
+    setSelected(prev => {
+      const next = { ...prev }
+      for (const id of Object.keys(next)) {
+        next[id] = {
+          ...next[id],
+          ...(bulkDuration ? { duration: bulkDuration } : {}),
+          ...(bulkReq ? { requirement: bulkReq } : {}),
+        }
+      }
+      return next
+    })
+    setBulkDuration('')
+    setBulkReq('')
+  }
+
   const displayItems = getDisplayItems()
-  const selectedCount = Object.keys(selected).length
+  const selectedList = Object.entries(selected)
+  const selectedCount = selectedList.length
+
+  const LESSON_BADGE: Record<string, string> = { video: 'badge-blue', doc: 'badge-teal', quiz: 'badge-amber', eval: 'badge-purple' }
 
   return (
     <div className="material-picker">
       <div className="material-picker-header">
         <p className="material-picker-hint">Select one or more items. Each becomes a lesson.</p>
         <div className="filter-chips" style={{ marginBottom: 8 }}>
-          {TYPE_TABS.map(t => <button key={t.key} className={`chip${tab === t.key ? ' active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>)}
+          {TYPE_TABS.map(t => (
+            <button key={t.key} className={`chip${tab === t.key ? ' active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>
+          ))}
         </div>
         <input className="search-input" placeholder="Search materials…" value={search} onChange={e => setSearch(e.target.value)} />
       </div>
@@ -439,7 +465,7 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
                   <span className="material-picker-title">{item.title}</span>
                   <span className="material-picker-subtitle">{item.subtitle}</span>
                 </div>
-                <span className={`badge badge-${item.lessonType === 'video' ? 'blue' : item.lessonType === 'doc' ? 'teal' : item.lessonType === 'quiz' ? 'amber' : 'purple'}`}>{item.lessonType}</span>
+                <span className={`badge ${LESSON_BADGE[item.lessonType] ?? 'badge-gray'}`}>{item.lessonType}</span>
               </label>
             )
           })}
@@ -447,22 +473,78 @@ function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void 
 
       {selectedCount > 0 && (
         <div className="material-picker-footer">
-          <div className="material-picker-selected-count">{selectedCount} item{selectedCount !== 1 ? 's' : ''} selected</div>
-          <div className="form-row" style={{ margin: 0, gap: 8 }}>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label style={{ fontSize: 11 }}>Duration (optional, applies to all)</label>
-              <input value={sharedDuration} placeholder="e.g. 15 min" onChange={e => setSharedDuration(e.target.value)} style={{ padding: '5px 8px', fontSize: 12 }} />
+          {/* ── Bulk apply ── */}
+          <div className="picker-bulk-row">
+            <span className="picker-bulk-label">Apply to all ({selectedCount} selected)</span>
+            <div className="picker-bulk-fields">
+              <input
+                className="picker-bulk-input"
+                value={bulkDuration}
+                placeholder="Duration (e.g. 15 min)"
+                onChange={e => setBulkDuration(e.target.value)}
+              />
+              <input
+                className="picker-bulk-input"
+                value={bulkReq}
+                placeholder="Requirement (e.g. Watch 90%)"
+                onChange={e => setBulkReq(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                onClick={applyToAll}
+                disabled={!bulkDuration && !bulkReq}
+              >
+                Apply to All
+              </button>
             </div>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label style={{ fontSize: 11 }}>Requirement (optional, applies to all)</label>
-              <input value={sharedReq} placeholder="e.g. Watch 90%" onChange={e => setSharedReq(e.target.value)} style={{ padding: '5px 8px', fontSize: 12 }} />
-            </div>
+          </div>
+
+          {/* ── Per-item configuration ── */}
+          <div className="picker-items-config">
+            <div className="picker-items-config-label">Configure each lesson individually</div>
+            {selectedList.map(([id, item]) => (
+              <div key={id} className="picker-item-row">
+                <div className="picker-item-name">
+                  <span style={{ fontSize: 14 }}>
+                    {item.lessonType === 'video' ? '🎬' : item.lessonType === 'doc' ? '📄' : item.lessonType === 'quiz' ? '❓' : '📝'}
+                  </span>
+                  <span className="picker-item-title">{item.title}</span>
+                  <span className={`badge ${LESSON_BADGE[item.lessonType] ?? 'badge-gray'}`} style={{ fontSize: 10 }}>{item.lessonType}</span>
+                </div>
+                <div className="picker-item-fields">
+                  <div className="picker-item-field-wrap">
+                    <label>Duration</label>
+                    <input
+                      value={item.duration}
+                      onChange={e => updateItem(id, 'duration', e.target.value)}
+                      placeholder="e.g. 15 min"
+                      className="picker-item-input"
+                    />
+                  </div>
+                  <div className="picker-item-field-wrap">
+                    <label>Requirement</label>
+                    <input
+                      value={item.requirement}
+                      onChange={e => updateItem(id, 'requirement', e.target.value)}
+                      placeholder="e.g. Watch 90%"
+                      className="picker-item-input"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       <div className="modal-form-actions">
-        <button type="button" className="btn btn-primary" disabled={selectedCount === 0} onClick={() => onSave(Object.values(selected).map(s => ({ ...s, duration: sharedDuration || s.duration, requirement: sharedReq || s.requirement })))}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={selectedCount === 0}
+          onClick={() => onSave(Object.values(selected))}
+        >
           Add {selectedCount > 0 ? selectedCount : ''} Lesson{selectedCount !== 1 ? 's' : ''}
         </button>
       </div>
