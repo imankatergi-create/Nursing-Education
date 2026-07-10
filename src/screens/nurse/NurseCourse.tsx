@@ -730,46 +730,63 @@ function DocViewer({
     load()
   }, [lessonId])
 
-  // When the active material changes, fetch it as a blob to render inline
+  // When the active material changes, build the right viewer URL
   useEffect(() => {
     const mat = materials[activeIdx]
     if (!mat?.file_url) { setBlobUrl(null); return }
 
-    const ext = mat.file_url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
-    const type = mat.type.toLowerCase()
-    const isNative = ['image','audio','video'].includes(type) ||
+    const rawUrl = mat.file_url
+    // Always derive extension from the actual filename in the URL, not the DB type field
+    const ext = rawUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+    const dbType = mat.type.toLowerCase()
+
+    const isNative = ['image','audio','video'].includes(dbType) ||
       ['png','jpg','jpeg','gif','webp','svg','mp3','wav','ogg','m4a','mp4','webm','mov'].includes(ext)
 
     if (isNative) {
-      setBlobUrl(mat.file_url)
+      setBlobUrl(rawUrl)
       return
     }
 
-    // Fetch document as blob — this strips the Content-Disposition: attachment header
-    setFetching(true)
-    setFetchError('')
-    setBlobUrl(null)
+    // Office formats (docx, pptx, xlsx, etc.) → Microsoft Office Online viewer
+    // This renders server-side so it doesn't matter what headers Supabase sends
+    const officeExts = ['doc','docx','ppt','pptx','xls','xlsx','odt','odp','ods']
+    if (officeExts.includes(ext)) {
+      setBlobUrl(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(rawUrl)}`)
+      setFetching(false)
+      return
+    }
 
-    fetch(mat.file_url)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.blob()
-      })
-      .then(blob => {
-        if (prevBlobRef.current) URL.revokeObjectURL(prevBlobRef.current)
-        const url = URL.createObjectURL(blob)
-        prevBlobRef.current = url
-        setBlobUrl(url)
-      })
-      .catch(err => setFetchError(`Could not load document: ${err.message}`))
-      .finally(() => setFetching(false))
+    // PDFs → fetch as blob, force application/pdf MIME type so Chrome renders inline
+    if (ext === 'pdf' || dbType === 'pdf') {
+      setFetching(true)
+      setFetchError('')
+      setBlobUrl(null)
 
-    return () => {
-      if (prevBlobRef.current) {
-        URL.revokeObjectURL(prevBlobRef.current)
-        prevBlobRef.current = null
+      fetch(rawUrl)
+        .then(async r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          const buf = await r.arrayBuffer()
+          // Explicitly set application/pdf so browser renders inline, not downloads
+          const blob = new Blob([buf], { type: 'application/pdf' })
+          if (prevBlobRef.current) URL.revokeObjectURL(prevBlobRef.current)
+          const url = URL.createObjectURL(blob)
+          prevBlobRef.current = url
+          setBlobUrl(url)
+        })
+        .catch(err => setFetchError(`Could not load document: ${err.message}`))
+        .finally(() => setFetching(false))
+
+      return () => {
+        if (prevBlobRef.current) {
+          URL.revokeObjectURL(prevBlobRef.current)
+          prevBlobRef.current = null
+        }
       }
     }
+
+    // Fallback for any other type → Google Docs Viewer
+    setBlobUrl(`https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(rawUrl)}`)
   }, [activeIdx, materials])
 
   // Reading timer
@@ -825,7 +842,7 @@ function DocViewer({
       )
     }
 
-    if (fetching || (!blobUrl && mat.file_url)) {
+    if (fetching) {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 12, background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 32 }}>⏳</div>
@@ -837,24 +854,26 @@ function DocViewer({
     if (!blobUrl) return null
 
     const ext = (mat.file_url ?? '').split('?')[0].split('.').pop()?.toLowerCase() ?? ''
-    const type = mat.type.toLowerCase()
+    const dbType = mat.type.toLowerCase()
 
-    if (type === 'image' || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)) {
+    if (dbType === 'image' || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)) {
       return <img src={blobUrl} alt={mat.title} style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '0 auto', boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
     }
-    if (type === 'audio' || ['mp3','wav','ogg','m4a'].includes(ext)) {
+    if (dbType === 'audio' || ['mp3','wav','ogg','m4a'].includes(ext)) {
       return <audio controls src={blobUrl} style={{ width: '100%' }} />
     }
-    if (type === 'video' || ['mp4','webm','mov'].includes(ext)) {
+    if (dbType === 'video' || ['mp4','webm','mov'].includes(ext)) {
       return <video controls src={blobUrl} style={{ width: '100%', borderRadius: 8 }} />
     }
 
-    // PDF and all other document types — blob URL renders inline without download headers
+    // PDF blob URLs, Office Online viewer URLs, Google Docs viewer URLs — all use iframe
     return (
       <iframe
+        key={blobUrl}
         src={blobUrl}
         title={mat.title}
-        style={{ width: '100%', height: 680, border: 'none', borderRadius: 8, display: 'block' }}
+        style={{ width: '100%', height: 700, border: 'none', borderRadius: 8, display: 'block', background: '#fff' }}
+        allowFullScreen
       />
     )
   }
