@@ -289,8 +289,9 @@ function CourseForm({
       videoSizeMb = parseFloat((videoFile.size / 1024 / 1024).toFixed(2))
     }
     const objectives = objectivesText.split('\n').map(s => s.trim()).filter(Boolean)
+    const { course_syllabuses: _cs, ...cleanForm } = form as any
     onSave(
-      { ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb, objectives },
+      { ...cleanForm, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb, objectives },
       Array.from(selectedSylIds)
     )
   }
