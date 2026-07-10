@@ -63,16 +63,23 @@ export default function App() {
   }, [profile?.role])
 
   useEffect(() => {
+    // getSession is safe — runs outside the auth lock.
+    // Handles the "already logged in" case (persisted session).
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) loadProfile(session.user.id)
       else setLoading(false)
     })
 
+    // onAuthStateChange must NEVER call supabase.from() — doing so deadlocks
+    // because Supabase holds an internal auth lock during this callback.
+    // Fresh logins are handled by Login.tsx calling setProfile() directly,
+    // which triggers the permissions useEffect above. We only need sign-out here.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      ;(async () => {
-        if (session?.user) await loadProfile(session.user.id)
-        else { setProfile(null); setLoading(false) }
-      })()
+      if (!session?.user) {
+        setProfile(null)
+        setPermissions([])
+        setLoading(false)
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -80,6 +87,7 @@ export default function App() {
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
+    setScreen(data?.role === 'nurse' ? 'ndash' : 'dashboard')
     setLoading(false)
   }
 
@@ -98,6 +106,11 @@ export default function App() {
   const openModal = useCallback((config: ModalConfig) => setModal(config), [])
   const closeModal = useCallback(() => setModal(null), [])
 
+  const handleLogin = useCallback((prof: Profile) => {
+    setProfile(prof)
+    setScreen(prof.role === 'nurse' ? 'ndash' : 'dashboard')
+  }, [])
+
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'var(--bg)' }}>
       <div style={{ textAlign:'center' }}>
@@ -113,7 +126,7 @@ export default function App() {
     return <PasswordResetPage />
   }
 
-  if (!profile) return <Login onLogin={setProfile} />
+  if (!profile) return <Login onLogin={handleLogin} />
 
   const role = profile.role
 
