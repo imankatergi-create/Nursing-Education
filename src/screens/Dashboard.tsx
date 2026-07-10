@@ -11,6 +11,9 @@ interface Stats {
   inprog_pct: number
   overdue_pct: number
 }
+interface TopCourse { title: string; enrolled: number; pct: number }
+interface DeptStat { dept: string; pct: number }
+interface ActivityItem { icon: string; user: string; action: string; item: string; time: string }
 
 const ROLE_DASH: Record<string, { title: string; subtitle: string }> = {
   superadmin: { title: 'System Overview', subtitle: 'Full platform analytics' },
@@ -21,27 +24,55 @@ const ROLE_DASH: Record<string, { title: string; subtitle: string }> = {
   it: { title: 'IT Dashboard', subtitle: 'System health and users' },
 }
 
+const STATUS_META: Record<string, { icon: string; action: string }> = {
+  completed:   { icon: '✅', action: 'Completed' },
+  in_progress: { icon: '▶️', action: 'Started' },
+  not_started: { icon: '📋', action: 'Enrolled in' },
+  overdue:     { icon: '⚠️', action: 'Overdue for' },
+}
+
+function timeAgo(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const h = Math.floor(diff / 3_600_000)
+  if (h < 1) return 'Just now'
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 7) return `${d}d ago`
+  return `${Math.floor(d / 7)}w ago`
+}
+
 export default function Dashboard() {
   const { role, navigate } = useApp()
   const [stats, setStats] = useState<Stats>({
     total_nurses: 0, active_courses: 0, completion_rate: 0,
     overdue_count: 0, done_pct: 0, inprog_pct: 0, overdue_pct: 0,
   })
+  const [topCourses, setTopCourses] = useState<TopCourse[]>([])
+  const [deptData, setDeptData] = useState<DeptStat[]>([])
+  const [activity, setActivity] = useState<ActivityItem[]>([])
 
   useEffect(() => {
     ;(async () => {
-      const [nurses, courses, enrollments] = await Promise.all([
+      const [nurses, courses, enrollments, courseStats, deptStats, recentEnr] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'nurse'),
         supabase.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'active'),
         supabase.from('nurse_enrollments').select('status,due_date'),
+        supabase.rpc('get_course_completion_stats'),
+        supabase.rpc('get_dept_coverage'),
+        supabase.from('nurse_enrollments')
+          .select('status, completed_at, enrolled_at, profiles(full_name), courses(title)')
+          .order('enrolled_at', { ascending: false })
+          .limit(8),
       ])
+
+      // KPI stats
       const enr = enrollments.data ?? []
       const total = enr.length
       const now = new Date()
       const done = enr.filter(e => e.status === 'completed').length
       const overdue = enr.filter(e => e.due_date && new Date(e.due_date) < now && e.status !== 'completed').length
       const inprog = enr.filter(e => e.status === 'in_progress').length
-
       const pct = (n: number) => total > 0 ? Math.round((n / total) * 100) : 0
 
       setStats({
@@ -53,6 +84,44 @@ export default function Dashboard() {
         inprog_pct: pct(inprog),
         overdue_pct: pct(overdue),
       })
+
+      // Top courses
+      if (courseStats.data && courseStats.data.length > 0) {
+        setTopCourses(courseStats.data.slice(0, 5).map((c: { course_title: string; enrolled: number; pct: number }) => ({
+          title: c.course_title, enrolled: c.enrolled, pct: c.pct,
+        })))
+      }
+
+      // Department completion
+      if (deptStats.data && deptStats.data.length > 0) {
+        setDeptData(deptStats.data.map((d: { dept_id: string; coverage_pct: number }) => ({
+          dept: d.dept_id, pct: d.coverage_pct,
+        })))
+      }
+
+      // Recent activity from enrollments
+      if (recentEnr.data && recentEnr.data.length > 0) {
+        const items: ActivityItem[] = recentEnr.data.map((e: {
+          status: string
+          completed_at: string | null
+          enrolled_at: string
+          profiles: { full_name: string }[] | null
+          courses: { title: string }[] | null
+        }) => {
+          const meta = STATUS_META[e.status] ?? { icon: '📋', action: 'Updated' }
+          const date = e.status === 'completed' ? e.completed_at : e.enrolled_at
+          const profile = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles
+          const course = Array.isArray(e.courses) ? e.courses[0] : e.courses
+          return {
+            icon: meta.icon,
+            user: (profile as { full_name: string } | null)?.full_name ?? 'Unknown',
+            action: meta.action,
+            item: (course as { title: string } | null)?.title ?? 'Unknown Course',
+            time: timeAgo(date),
+          }
+        })
+        setActivity(items)
+      }
     })()
   }, [])
 
@@ -105,23 +174,21 @@ export default function Dashboard() {
             <h3>Department Completion</h3>
             <button className="btn btn-sm" onClick={() => navigate('reports')}>View Report</button>
           </div>
-          <div className="bar-chart">
-            {[
-              { dept: 'ICU', pct: 94 },
-              { dept: 'Emergency', pct: 88 },
-              { dept: 'Oncology', pct: 82 },
-              { dept: 'Pediatrics', pct: 79 },
-              { dept: 'Surgery', pct: 91 },
-            ].map(r => (
-              <div key={r.dept} className="bar-row">
-                <div className="bar-label">{r.dept}</div>
-                <div className="bar-track">
-                  <div className="bar-fill" style={{ width: `${r.pct}%` }} />
+          {deptData.length > 0 ? (
+            <div className="bar-chart">
+              {deptData.map(r => (
+                <div key={r.dept} className="bar-row">
+                  <div className="bar-label">{r.dept}</div>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{ width: `${r.pct}%` }} />
+                  </div>
+                  <div className="bar-value">{r.pct}%</div>
                 </div>
-                <div className="bar-value">{r.pct}%</div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">No department data yet</div>
+          )}
         </div>
 
         <div className="card">
@@ -129,13 +196,7 @@ export default function Dashboard() {
             <h3>Recent Activity</h3>
           </div>
           <div className="activity-list">
-            {[
-              { user: 'Rania Khalil', action: 'Completed', item: 'BLS/CPR Recertification', time: '2h ago', icon: '✅' },
-              { user: 'Ahmad Saleh', action: 'Started', item: 'Patient Safety Fundamentals', time: '4h ago', icon: '▶️' },
-              { user: 'Sara Mansour', action: 'Passed quiz', item: 'Hand Hygiene Protocol', time: '6h ago', icon: '🎯' },
-              { user: 'Omar Haddad', action: 'Downloaded', item: 'IV Insertion Checklist', time: '1d ago', icon: '📥' },
-              { user: 'Lina Khoury', action: 'Published', item: 'New course: Sepsis Protocol', time: '2d ago', icon: '🆕' },
-            ].map((a, i) => (
+            {activity.length > 0 ? activity.map((a, i) => (
               <div key={i} className="activity-item">
                 <span className="activity-icon">{a.icon}</span>
                 <div className="activity-body">
@@ -145,7 +206,9 @@ export default function Dashboard() {
                 </div>
                 <span className="activity-time">{a.time}</span>
               </div>
-            ))}
+            )) : (
+              <div className="empty-state">No activity yet</div>
+            )}
           </div>
         </div>
 
@@ -154,28 +217,26 @@ export default function Dashboard() {
             <h3>Top Courses by Enrollment</h3>
             <button className="btn btn-sm" onClick={() => navigate('courses')}>All Courses</button>
           </div>
-          <div className="course-mini-list">
-            {[
-              { title: 'BLS/CPR Recertification', enrolled: 142, pct: 78 },
-              { title: 'Patient Safety Fundamentals', enrolled: 118, pct: 91 },
-              { title: 'Hand Hygiene Protocol', enrolled: 134, pct: 95 },
-              { title: 'IV Insertion & Management', enrolled: 96, pct: 64 },
-              { title: 'Sepsis Bundle Protocol', enrolled: 87, pct: 71 },
-            ].map((c, i) => (
-              <div key={i} className="course-mini-row">
-                <div className="course-mini-info">
-                  <span className="course-mini-title">{c.title}</span>
-                  <span className="course-mini-enrolled">{c.enrolled} enrolled</span>
-                </div>
-                <div className="course-mini-progress">
-                  <div className="bar-track sm">
-                    <div className="bar-fill" style={{ width: `${c.pct}%` }} />
+          {topCourses.length > 0 ? (
+            <div className="course-mini-list">
+              {topCourses.map((c, i) => (
+                <div key={i} className="course-mini-row">
+                  <div className="course-mini-info">
+                    <span className="course-mini-title">{c.title}</span>
+                    <span className="course-mini-enrolled">{c.enrolled} enrolled</span>
                   </div>
-                  <span>{c.pct}%</span>
+                  <div className="course-mini-progress">
+                    <div className="bar-track sm">
+                      <div className="bar-fill" style={{ width: `${c.pct}%` }} />
+                    </div>
+                    <span>{c.pct}%</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">No enrollment data yet</div>
+          )}
         </div>
 
         <div className="card">
