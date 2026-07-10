@@ -85,6 +85,7 @@ export default function NurseCourse() {
     }
     setLessonsByModule(map)
     setAllLessonIds(ids)
+    if (ids.length === 0) setLoadingProgress(false)
   }
 
   async function loadProgress() {
