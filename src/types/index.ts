@@ -223,6 +223,9 @@ export interface Feedback {
   relevance_rating: number
   difficulty: string
   suggestions: string
+  open_comments?: string
+  anonymous: boolean
+  submitted_at: string
 }
 
 export interface EmailTemplate {
