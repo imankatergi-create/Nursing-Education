@@ -596,48 +596,68 @@ function DocViewer({
   function renderViewer() {
     if (!mat?.file_url) return null
     const url = mat.file_url
-    const type = mat.type
+    const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+    const type = mat.type.toLowerCase()
 
-    if (type === 'PDF') {
+    const isPdf = type === 'pdf' || ext === 'pdf'
+    const isImage = type === 'image' || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)
+    const isAudio = type === 'audio' || ['mp3','wav','ogg','m4a'].includes(ext)
+    const isVideo = type === 'video' || ['mp4','webm','mov'].includes(ext)
+
+    if (isPdf) {
       return (
-        <iframe
-          src={url}
-          title={mat.title}
-          className="doc-iframe"
-          style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
-        />
+        <object
+          data={url}
+          type="application/pdf"
+          style={{ width: '100%', height: 640, borderRadius: 8, border: '1px solid var(--border)', display: 'block' }}
+        >
+          {/* fallback if browser can't embed */}
+          <div style={{ padding: '32px', textAlign: 'center', background: 'var(--surface)', borderRadius: 8 }}>
+            <div style={{ marginBottom: 8, color: 'var(--muted)', fontSize: 14 }}>
+              Your browser cannot display this PDF inline.
+            </div>
+            <a href={url} target="_blank" rel="noreferrer" className="btn btn-primary">
+              Open PDF
+            </a>
+          </div>
+        </object>
       )
     }
-    if (type === 'Image') {
+    if (isImage) {
       return (
         <div style={{ textAlign: 'center', padding: '16px 0' }}>
           <img src={url} alt={mat.title} style={{ maxWidth: '100%', maxHeight: 560, borderRadius: 8, boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
         </div>
       )
     }
-    if (type === 'Audio') {
+    if (isAudio) {
       return (
         <div style={{ padding: '24px 0' }}>
           <audio controls src={url} style={{ width: '100%' }} />
         </div>
       )
     }
-    if (type === 'Video') {
+    if (isVideo) {
       return (
         <div style={{ padding: '16px 0' }}>
           <video controls src={url} style={{ width: '100%', borderRadius: 8 }} />
         </div>
       )
     }
-    // PPT, Protocol, Checklist, Link/URL, other — open in new tab
+    // PPT, Word, etc. — embed via Google Docs Viewer
+    const docsUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`
     return (
-      <div style={{ padding: '32px', textAlign: 'center', background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 48, marginBottom: 12 }}>{typeIcon[type] ?? '📎'}</div>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>{mat.title}</div>
-        {mat.size_text && <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>{mat.size_text}</div>}
-        <a href={url} target="_blank" rel="noreferrer" className="btn btn-primary">
-          Open {type}
-        </a>
+      <div>
+        <iframe
+          src={docsUrl}
+          title={mat.title}
+          style={{ width: '100%', height: 600, border: '1px solid var(--border)', borderRadius: 8, display: 'block' }}
+        />
+        <div style={{ marginTop: 8, textAlign: 'right' }}>
+          <a href={url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline">
+            Download original
+          </a>
+        </div>
       </div>
     )
   }
@@ -699,18 +719,34 @@ function DocViewer({
               </div>
             )}
 
-            {!acked ? (
-              <div className="doc-ack-box">
-                <p>I confirm I have read and understood this material and will comply with all requirements.</p>
-                <button className="btn btn-primary" onClick={handleAcknowledge}>
-                  Acknowledge & Complete
-                </button>
-              </div>
-            ) : (
-              <div className="doc-acked">
-                Document acknowledged on {new Date().toLocaleDateString()}
-              </div>
-            )}
+            {/* Acknowledgement — always visible regardless of viewer type */}
+            <div style={{
+              marginTop: 24,
+              padding: '20px 24px',
+              borderRadius: 10,
+              border: acked ? '1.5px solid var(--green)' : '1.5px solid var(--teal)',
+              background: acked ? 'var(--green-t)' : 'var(--teal-t)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}>
+              {acked ? (
+                <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 14 }}>
+                  ✅ Document acknowledged on {new Date().toLocaleDateString()}
+                </span>
+              ) : (
+                <>
+                  <span style={{ fontSize: 14, color: 'var(--text)', flex: 1 }}>
+                    I confirm I have read and understood this material and will comply with all requirements.
+                  </span>
+                  <button className="btn btn-primary" onClick={handleAcknowledge} style={{ flexShrink: 0 }}>
+                    Acknowledge &amp; Complete
+                  </button>
+                </>
+              )}
+            </div>
           </>
         )}
       </div>
