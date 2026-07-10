@@ -68,11 +68,17 @@ export default function NurseCourse() {
 
   async function loadSyllabus() {
     setSyllabusLoading(true)
-    const { data: mods } = await supabase
-      .from('course_modules')
-      .select('*')
-      .eq('course_id', courseId)
-      .order('order_index')
+
+    // First, load the course to check if it has a syllabus_id
+    const { data: courseData } = await supabase.from('courses').select('syllabus_id').eq('id', courseId).maybeSingle()
+    const syllabusId = (courseData as { syllabus_id?: string | null } | null)?.syllabus_id
+
+    // Load modules from the linked syllabus (if set), otherwise from the course directly
+    const modsQuery = syllabusId
+      ? supabase.from('course_modules').select('*').eq('syllabus_id', syllabusId).order('order_index')
+      : supabase.from('course_modules').select('*').eq('course_id', courseId).order('order_index')
+
+    const { data: mods } = await modsQuery
 
     if (mods && mods.length > 0) {
       const lmap: Record<string, Lesson[]> = {}

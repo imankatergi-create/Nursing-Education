@@ -33,6 +33,13 @@ export interface Unit {
   supervisor?: string
 }
 
+export interface Syllabus {
+  id: string
+  title: string
+  description: string
+  created_at: string
+}
+
 export interface Course {
   id: string
   title: string
@@ -56,11 +63,13 @@ export interface Course {
   video_filename?: string
   video_size_mb?: number
   video_duration_sec?: number
+  syllabus_id?: string | null
 }
 
 export interface CourseModule {
   id: string
-  course_id: string
+  course_id: string | null
+  syllabus_id?: string | null
   title: string
   order_index: number
 }

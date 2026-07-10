@@ -44,7 +44,7 @@ export default function NurseCourses() {
     // Load nurse's enrollments with course details
     const { data: enrollments } = await supabase
       .from('nurse_enrollments')
-      .select('id,course_id,status,completion_pct,due_date,mandatory,courses(id,title,code,category,duration,level,thumbnail_icon,thumbnail_color,mandatory)')
+      .select('id,course_id,status,completion_pct,due_date,mandatory,courses(id,title,code,category,duration,level,thumbnail_icon,thumbnail_color,mandatory,syllabus_id)')
       .eq('profile_id', profile!.id)
 
     if (!enrollments || enrollments.length === 0) {
@@ -55,16 +55,37 @@ export default function NurseCourses() {
 
     const courseIds = enrollments.map(e => e.course_id)
 
-    // Count total lessons per course via course_modules → lessons
-    const { data: lessonCounts } = await supabase
-      .from('lessons')
-      .select('module_id, course_modules!inner(course_id)')
-      .in('course_modules.course_id', courseIds)
+    // For each enrolled course, resolve whether it uses a syllabus_id or course_id for its modules
+    type CourseRow = { id: string; title: string; code: string; category: string; duration: string; level: string; thumbnail_icon: string; thumbnail_color: string; mandatory: boolean; syllabus_id?: string | null }
+    const courseRows = enrollments.map(e => e.courses as unknown as CourseRow | null)
 
-    const totalMap: Record<string, number> = {}
-    for (const l of lessonCounts ?? []) {
+    // Collect syllabus IDs that are in use
+    const syllabusIds = courseRows.flatMap(c => (c?.syllabus_id ? [c.syllabus_id] : []))
+
+    // Count lessons per course_id (for courses without a syllabus)
+    const courseIdsWithoutSyllabus = enrollments
+      .filter((_, i) => !courseRows[i]?.syllabus_id)
+      .map(e => e.course_id)
+
+    // Count lessons per syllabus_id (for courses with a syllabus)
+    const [lessonsByCourse, lessonsBySyllabus] = await Promise.all([
+      courseIdsWithoutSyllabus.length > 0
+        ? supabase.from('lessons').select('module_id, course_modules!inner(course_id)').in('course_modules.course_id', courseIdsWithoutSyllabus)
+        : Promise.resolve({ data: [] }),
+      syllabusIds.length > 0
+        ? supabase.from('lessons').select('module_id, course_modules!inner(syllabus_id)').in('course_modules.syllabus_id', syllabusIds)
+        : Promise.resolve({ data: [] }),
+    ])
+
+    const totalByCourseId: Record<string, number> = {}
+    for (const l of lessonsByCourse.data ?? []) {
       const courseId = (l.course_modules as unknown as { course_id: string }).course_id
-      totalMap[courseId] = (totalMap[courseId] ?? 0) + 1
+      totalByCourseId[courseId] = (totalByCourseId[courseId] ?? 0) + 1
+    }
+    const totalBySyllabusId: Record<string, number> = {}
+    for (const l of lessonsBySyllabus.data ?? []) {
+      const sId = (l.course_modules as unknown as { syllabus_id: string }).syllabus_id
+      totalBySyllabusId[sId] = (totalBySyllabusId[sId] ?? 0) + 1
     }
 
     // Count completed lessons per course from lesson_progress
@@ -80,8 +101,9 @@ export default function NurseCourses() {
     }
 
     const list: EnrolledCourse[] = enrollments.map((e) => {
-      const c = e.courses as unknown as { id: string; title: string; code: string; category: string; duration: string; level: string; thumbnail_icon: string; thumbnail_color: string; mandatory: boolean } | null
-      const total = totalMap[e.course_id] ?? 0
+      const c = courseRows[enrollments.indexOf(e)]
+      const syllabusId = c?.syllabus_id
+      const total = syllabusId ? (totalBySyllabusId[syllabusId] ?? 0) : (totalByCourseId[e.course_id] ?? 0)
       const done = doneMap[e.course_id] ?? 0
       const pct = total > 0 ? Math.round((done / total) * 100) : (e.completion_pct ?? 0)
 
