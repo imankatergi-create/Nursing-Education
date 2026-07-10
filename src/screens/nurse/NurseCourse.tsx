@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import * as mammoth from 'mammoth'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
 import type { Course, CourseModule, Lesson } from '../../types'
@@ -709,6 +710,7 @@ function DocViewer({
   const [secondsRead, setSecondsRead] = useState(0)
   // Blob URL for doc/pdf viewer — bypasses Content-Disposition: attachment from storage
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [docHtml, setDocHtml] = useState<string | null>(null)
   const [fetching, setFetching] = useState(false)
   const [fetchError, setFetchError] = useState('')
   const prevBlobRef = useRef<string | null>(null)
@@ -733,10 +735,9 @@ function DocViewer({
   // When the active material changes, build the right viewer URL
   useEffect(() => {
     const mat = materials[activeIdx]
-    if (!mat?.file_url) { setBlobUrl(null); return }
+    if (!mat?.file_url) { setBlobUrl(null); setDocHtml(null); return }
 
     const rawUrl = mat.file_url
-    // Always derive extension from the actual filename in the URL, not the DB type field
     const ext = rawUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
     const dbType = mat.type.toLowerCase()
 
@@ -745,29 +746,41 @@ function DocViewer({
 
     if (isNative) {
       setBlobUrl(rawUrl)
+      setDocHtml(null)
       return
     }
 
-    // Office formats (docx, pptx, xlsx, etc.) → Microsoft Office Online viewer
-    // This renders server-side so it doesn't matter what headers Supabase sends
-    const officeExts = ['doc','docx','ppt','pptx','xls','xlsx','odt','odp','ods']
-    if (officeExts.includes(ext)) {
-      setBlobUrl(`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(rawUrl)}`)
-      setFetching(false)
-      return
-    }
-
-    // PDFs → fetch as blob, force application/pdf MIME type so Chrome renders inline
-    if (ext === 'pdf' || dbType === 'pdf') {
+    // Word documents → mammoth.js converts to HTML client-side, no external service needed
+    const wordExts = ['doc','docx','odt']
+    if (wordExts.includes(ext)) {
       setFetching(true)
       setFetchError('')
       setBlobUrl(null)
+      setDocHtml(null)
 
       fetch(rawUrl)
         .then(async r => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
           const buf = await r.arrayBuffer()
-          // Explicitly set application/pdf so browser renders inline, not downloads
+          const result = await mammoth.convertToHtml({ arrayBuffer: buf })
+          setDocHtml(result.value)
+        })
+        .catch(err => setFetchError(`Could not load document: ${err.message}`))
+        .finally(() => setFetching(false))
+      return
+    }
+
+    // PDFs → fetch as blob with forced application/pdf MIME type so Chrome renders inline
+    if (ext === 'pdf' || dbType === 'pdf') {
+      setFetching(true)
+      setFetchError('')
+      setBlobUrl(null)
+      setDocHtml(null)
+
+      fetch(rawUrl)
+        .then(async r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          const buf = await r.arrayBuffer()
           const blob = new Blob([buf], { type: 'application/pdf' })
           if (prevBlobRef.current) URL.revokeObjectURL(prevBlobRef.current)
           const url = URL.createObjectURL(blob)
@@ -785,8 +798,9 @@ function DocViewer({
       }
     }
 
-    // Fallback for any other type → Google Docs Viewer
-    setBlobUrl(`https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(rawUrl)}`)
+    // Other file types (pptx, xlsx, etc.) — show download fallback
+    setBlobUrl(rawUrl)
+    setDocHtml(null)
   }, [activeIdx, materials])
 
   // Reading timer
@@ -835,7 +849,7 @@ function DocViewer({
           <div style={{ color: 'var(--red)', marginBottom: 12, fontSize: 14 }}>{fetchError}</div>
           {mat.file_url && (
             <a href={mat.file_url} target="_blank" rel="noreferrer" className="btn btn-primary">
-              Open in new tab
+              Download file
             </a>
           )}
         </div>
@@ -848,6 +862,21 @@ function DocViewer({
           <div style={{ fontSize: 32 }}>⏳</div>
           <span style={{ color: 'var(--muted)', fontSize: 14 }}>Loading document…</span>
         </div>
+      )
+    }
+
+    // Word doc converted to HTML by mammoth
+    if (docHtml !== null) {
+      return (
+        <div style={{
+          background: '#fff', border: '1px solid var(--border)', borderRadius: 8,
+          padding: '32px 40px', maxHeight: 700, overflowY: 'auto',
+          fontFamily: 'Georgia, "Times New Roman", serif',
+          fontSize: 15, lineHeight: 1.75, color: '#1a1a1a',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+        }}
+          dangerouslySetInnerHTML={{ __html: docHtml || '<p style="color:var(--muted)">Document is empty.</p>' }}
+        />
       )
     }
 
@@ -866,15 +895,31 @@ function DocViewer({
       return <video controls src={blobUrl} style={{ width: '100%', borderRadius: 8 }} />
     }
 
-    // PDF blob URLs, Office Online viewer URLs, Google Docs viewer URLs — all use iframe
+    // PDF blob URL
+    if (ext === 'pdf' || blobUrl.startsWith('blob:')) {
+      return (
+        <iframe
+          key={blobUrl}
+          src={blobUrl}
+          title={mat.title}
+          style={{ width: '100%', height: 700, border: 'none', borderRadius: 8, display: 'block', background: '#fff' }}
+          allowFullScreen
+        />
+      )
+    }
+
+    // Unsupported format (pptx, xlsx, etc.) — show download prompt
     return (
-      <iframe
-        key={blobUrl}
-        src={blobUrl}
-        title={mat.title}
-        style={{ width: '100%', height: 700, border: 'none', borderRadius: 8, display: 'block', background: '#fff' }}
-        allowFullScreen
-      />
+      <div style={{ padding: '40px 32px', textAlign: 'center', background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>📎</div>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>{mat.title}</div>
+        <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>
+          This file type ({ext.toUpperCase()}) must be downloaded to view.
+        </div>
+        <a href={blobUrl} target="_blank" rel="noreferrer" className="btn btn-primary">
+          Download to view
+        </a>
+      </div>
     )
   }
 
