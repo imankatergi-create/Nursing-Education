@@ -48,9 +48,10 @@ export default function CoverageScreen() {
       const stats: DeptStat[] = depts.map(d => {
         const coords = DEPT_COORDS[d.name] ?? DEPT_COORDS[d.id] ?? { x: 50, y: 50, color: '#64748b' }
         const count = nurses.filter(n => n.dept_id === d.id || n.dept_id === d.name).length
+        const totalInDept = nurses.length > 0 ? nurses.length : 1
         return {
           dept: d.name, x: coords.x, y: coords.y, color: coords.color,
-          pct: count > 0 ? Math.floor(Math.random() * 30) + 65 : 0,
+          pct: count > 0 ? Math.min(100, Math.round((count / totalInDept) * 100 * 5)) : 0,
           count,
         }
       })
@@ -58,9 +59,7 @@ export default function CoverageScreen() {
       // If no departments in DB, show placeholder coords
       if (stats.length === 0) {
         const fallback = Object.entries(DEPT_COORDS).map(([dept, coords]) => ({
-          dept, ...coords,
-          pct: Math.floor(Math.random() * 30) + 65,
-          count: Math.floor(Math.random() * 15) + 5,
+          dept, ...coords, pct: 0, count: 0,
         }))
         setDeptStats(fallback)
       } else {
