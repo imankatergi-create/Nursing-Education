@@ -48,6 +48,7 @@ export default function NurseCourse() {
   const [modules, setModules] = useState<CourseModule[]>([])
   const [lessonMap, setLessonMap] = useState<Record<string, Lesson[]>>({})
   const [allLessonIds, setAllLessonIds] = useState<string[]>([])
+  const [materialUrlMap, setMaterialUrlMap] = useState<Record<string, { file_url?: string; type?: string }>>({})
   const [syllabusLoading, setSyllabusLoading] = useState(true)
 
   const [progressMap, setProgressMap] = useState<Record<string, LessonRow>>({})
@@ -76,6 +77,7 @@ export default function NurseCourse() {
     if (mods && mods.length > 0) {
       const lmap: Record<string, Lesson[]> = {}
       const ids: string[] = []
+      const materialIds: string[] = []
       for (const m of mods) {
         const { data: ls } = await supabase
           .from('lessons')
@@ -84,7 +86,20 @@ export default function NurseCourse() {
           .order('order_index')
         const lessons = (ls ?? []) as Lesson[]
         lmap[m.id] = lessons
-        for (const l of lessons) ids.push(l.id)
+        for (const l of lessons) {
+          ids.push(l.id)
+          if (l.material_id) materialIds.push(l.material_id)
+        }
+      }
+      // Load material file URLs in one query
+      if (materialIds.length > 0) {
+        const { data: mats } = await supabase
+          .from('materials')
+          .select('id,file_url,type')
+          .in('id', materialIds)
+        const urlMap: Record<string, { file_url?: string; type?: string }> = {}
+        for (const mat of mats ?? []) urlMap[mat.id] = { file_url: mat.file_url, type: mat.type }
+        setMaterialUrlMap(urlMap)
       }
       setModules(mods as CourseModule[])
       setLessonMap(lmap)
@@ -177,10 +192,20 @@ export default function NurseCourse() {
 
   const currentLesson = params.lessonId ? getLessonForId(params.lessonId) : undefined
 
+  // Resolve the actual content URL: prefer material file_url over lesson-level fields
+  function resolveContentUrl(lesson?: Lesson): string | undefined {
+    if (!lesson) return undefined
+    if (lesson.material_id && materialUrlMap[lesson.material_id]?.file_url) {
+      return materialUrlMap[lesson.material_id].file_url
+    }
+    return lesson.video_url ?? lesson.doc_url
+  }
+
   if (params.view === 'video') return (
     <VideoPlayer
       course={course}
       lesson={currentLesson}
+      resolvedUrl={resolveContentUrl(currentLesson)}
       courseId={courseId}
       lessonId={params.lessonId ?? ''}
       profileId={profileId}
@@ -192,6 +217,7 @@ export default function NurseCourse() {
   if (params.view === 'doc') return (
     <DocViewer
       lesson={currentLesson}
+      resolvedUrl={resolveContentUrl(currentLesson)}
       courseId={courseId}
       lessonId={params.lessonId ?? ''}
       profileId={profileId}
@@ -307,10 +333,11 @@ export default function NurseCourse() {
 // ─── VideoPlayer ────────────────────────────────────────────────────────────
 
 function VideoPlayer({
-  course, lesson, courseId, lessonId, profileId, initialProgress, onBack, onCompleted,
+  course, lesson, resolvedUrl, courseId, lessonId, profileId, initialProgress, onBack, onCompleted,
 }: {
   course: Course
   lesson?: Lesson
+  resolvedUrl?: string
   courseId: string
   lessonId: string
   profileId: string
@@ -328,8 +355,8 @@ function VideoPlayer({
   const alreadyCompleted = useRef(initialProgress >= 90)
   progressRef.current = progress
 
-  // Use lesson-specific video_url first, fall back to course-level video
-  const videoUrl = lesson?.video_url ?? course.video_url
+  // resolvedUrl takes priority (material file_url), then lesson-level, then course-level
+  const videoUrl = resolvedUrl ?? lesson?.video_url ?? course.video_url
   const hasRealVideo = Boolean(videoUrl)
 
   function onTimeUpdate() {
@@ -504,9 +531,10 @@ function VideoPlayer({
 // ─── DocViewer ───────────────────────────────────────────────────────────────
 
 function DocViewer({
-  lesson, courseId, lessonId, profileId, initialPage, initialAcked, onBack, onCompleted,
+  lesson, resolvedUrl, courseId, lessonId, profileId, initialPage, initialAcked, onBack, onCompleted,
 }: {
   lesson?: Lesson
+  resolvedUrl?: string
   courseId: string
   lessonId: string
   profileId: string
@@ -518,8 +546,8 @@ function DocViewer({
   const [page, setPage] = useState(initialPage)
   const [acked, setAcked] = useState(initialAcked)
 
-  // If lesson has a real doc URL, open it in an iframe; otherwise show demo text
-  const docUrl = lesson?.doc_url
+  // resolvedUrl takes priority over lesson-level doc_url
+  const docUrl = resolvedUrl ?? lesson?.doc_url
   const totalPages = docUrl ? 1 : 6
 
   const pageContent = [

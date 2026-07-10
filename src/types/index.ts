@@ -78,6 +78,7 @@ export interface Lesson {
   doc_url?: string
   doc_filename?: string
   quiz_id?: string
+  material_id?: string
 }
 
 export interface Program {
@@ -116,6 +117,7 @@ export interface Material {
   views: number
   avg_time?: string
   completion_pct: number
+  file_url?: string
 }
 
 export interface MaterialVersion {

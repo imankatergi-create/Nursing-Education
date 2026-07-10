@@ -1,8 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
 import { COURSES } from '../data/constants'
-import type { Course, CourseModule, Lesson, Quiz } from '../types'
+import type { Course, CourseModule, Lesson, Material, Quiz } from '../types'
+
+// Maps material type strings to lesson types
+function materialToLessonType(matType: string): 'video' | 'doc' | 'quiz' | 'eval' {
+  if (matType === 'Video') return 'video'
+  if (matType === 'Quiz') return 'quiz'
+  if (matType === 'Evaluation') return 'eval'
+  return 'doc'
+}
+
+const defaultRequirement: Record<string, string> = {
+  video: 'Watch 90%', doc: 'Acknowledge read', quiz: 'Score ≥80%', eval: 'Complete all questions',
+}
 
 export default function SyllabusScreen() {
   const { params, toast, openModal, closeModal } = useApp()
@@ -80,13 +92,31 @@ export default function SyllabusScreen() {
 
   function openAddLesson(moduleId: string) {
     openModal({
-      title: 'Add Lesson',
+      title: 'Add Lessons from Library',
       wide: true,
-      body: <LessonForm onSave={async d => {
-        const count = (lessons[moduleId] ?? []).length
-        await supabase.from('lessons').insert({ ...d, module_id: moduleId, order_index: count + 1 })
-        if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson added')
-      }} />,
+      body: (
+        <MaterialPickerForm
+          onSave={async (items) => {
+            const base = (lessons[moduleId] ?? []).length
+            const rows = items.map((item, i) => ({
+              module_id: moduleId,
+              title: item.title,
+              type: item.lessonType,
+              duration_text: item.duration,
+              requirement: item.requirement || defaultRequirement[item.lessonType],
+              material_id: item.materialId || null,
+              quiz_id: item.quizId || null,
+              order_index: base + i + 1,
+            }))
+            for (const row of rows) {
+              await supabase.from('lessons').insert(row)
+            }
+            if (selectedCourse) loadCourse(selectedCourse)
+            closeModal()
+            toast(`${items.length} lesson${items.length !== 1 ? 's' : ''} added`)
+          }}
+        />
+      ),
     })
   }
 
@@ -94,7 +124,7 @@ export default function SyllabusScreen() {
     openModal({
       title: 'Edit Lesson',
       wide: true,
-      body: <LessonForm initial={lesson} onSave={async d => {
+      body: <LessonEditForm initial={lesson} onSave={async d => {
         await supabase.from('lessons').update(d).eq('id', lesson.id)
         if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson updated')
       }} />,
@@ -109,6 +139,7 @@ export default function SyllabusScreen() {
   }
 
   const typeIcon: Record<string, string> = { video: '🎬', doc: '📄', quiz: '❓', eval: '📝' }
+  const typeBadge: Record<string, string> = { video: 'badge-blue', doc: 'badge-teal', quiz: 'badge-amber', eval: 'badge-purple' }
 
   return (
     <div className="screen-container">
@@ -145,14 +176,21 @@ export default function SyllabusScreen() {
                 </div>
               </div>
               <div className="lessons-list">
-                {(lessons[mod.id] ?? []).map(lesson => (
+                {(lessons[mod.id] ?? []).length === 0 ? (
+                  <div style={{ padding: '12px 16px', fontSize: 13, color: 'var(--muted)' }}>
+                    No lessons yet — click <strong>+ Lesson</strong> to add from the library.
+                  </div>
+                ) : (lessons[mod.id] ?? []).map(lesson => (
                   <div key={lesson.id} className="lesson-row">
                     <span className="lesson-type-icon">{typeIcon[lesson.type] ?? '📌'}</span>
                     <div className="lesson-info">
                       <span className="lesson-title">{lesson.title}</span>
-                      <span className="lesson-meta">{lesson.duration_text} · {lesson.requirement}</span>
+                      <span className="lesson-meta">
+                        {lesson.duration_text} · {lesson.requirement}
+                        {lesson.material_id && <span className="material-linked-tag">📎 from library</span>}
+                      </span>
                     </div>
-                    <span className={`badge badge-${lesson.type === 'video' ? 'blue' : lesson.type === 'doc' ? 'teal' : lesson.type === 'quiz' ? 'amber' : 'purple'}`}>{lesson.type}</span>
+                    <span className={`badge ${typeBadge[lesson.type] ?? 'badge-gray'}`}>{lesson.type}</span>
                     <div className="lesson-row-actions">
                       <button className="btn btn-sm btn-outline" onClick={() => openEditLesson(lesson)}>Edit</button>
                       <button className="btn btn-sm btn-danger" onClick={() => deleteLesson(lesson)}>Delete</button>
@@ -168,6 +206,8 @@ export default function SyllabusScreen() {
   )
 }
 
+// ── ModuleForm ────────────────────────────────────────────────────────────────
+
 function ModuleForm({ initial, onSave }: { initial?: Partial<CourseModule>; onSave: (d: { title: string }) => void }) {
   const [title, setTitle] = useState(initial?.title ?? '')
   return (
@@ -178,209 +218,232 @@ function ModuleForm({ initial, onSave }: { initial?: Partial<CourseModule>; onSa
   )
 }
 
-function LessonForm({ initial, onSave }: { initial?: Partial<Lesson>; onSave: (d: Partial<Lesson>) => void }) {
-  const [form, setForm] = useState(() => {
-    const base = { title: '', type: 'video' as 'video'|'doc'|'quiz'|'eval', duration_text: '', requirement: '', video_url: '', doc_url: '', doc_filename: '', quiz_id: '' }
-    if (!initial) return base
-    return {
-      ...base,
-      ...initial,
-      video_url: initial.video_url ?? '',
-      doc_url: initial.doc_url ?? '',
-      doc_filename: initial.doc_filename ?? '',
-      quiz_id: initial.quiz_id ?? '',
-    }
-  })
+// ── MaterialPickerForm — multi-select from library ────────────────────────────
 
+interface PickerItem {
+  materialId?: string
+  quizId?: string
+  title: string
+  lessonType: 'video' | 'doc' | 'quiz' | 'eval'
+  duration: string
+  requirement: string
+}
+
+const TYPE_TABS = [
+  { key: 'all', label: 'All' },
+  { key: 'video', label: 'Video' },
+  { key: 'doc', label: 'Document' },
+  { key: 'quiz', label: 'Quiz' },
+  { key: 'eval', label: 'Evaluation' },
+]
+
+const MAT_TYPE_GROUPS: Record<string, string[]> = {
+  video: ['Video'],
+  doc: ['PDF', 'PPT', 'Checklist', 'Protocol', 'Image', 'Audio', 'Link/URL'],
+  eval: ['Evaluation'],
+}
+
+const MAT_TYPE_ICON: Record<string, string> = {
+  Video: '🎬', PDF: '📄', PPT: '📊', Checklist: '✅', Protocol: '📋',
+  'Link/URL': '🔗', Image: '🖼️', Audio: '🎵', Evaluation: '📝', Quiz: '❓',
+}
+
+function MaterialPickerForm({ onSave }: { onSave: (items: PickerItem[]) => void }) {
+  const [materials, setMaterials] = useState<Material[]>([])
   const [quizzes, setQuizzes] = useState<Quiz[]>([])
-  const [videoFile, setVideoFile] = useState<File | null>(null)
-  const [docFile, setDocFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState('')
-  const videoRef = useRef<HTMLInputElement>(null)
-  const docRef = useRef<HTMLInputElement>(null)
-
-  const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }))
+  const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('all')
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Record<string, PickerItem>>({})
+  const [sharedDuration, setSharedDuration] = useState('')
+  const [sharedReq, setSharedReq] = useState('')
 
   useEffect(() => {
-    supabase.from('quizzes').select('id,title').order('title').then(({ data }) => {
-      if (data) setQuizzes(data as Quiz[])
+    Promise.all([
+      supabase.from('materials').select('id,title,type,size_text,file_url').order('title'),
+      supabase.from('quizzes').select('id,title,pass_score,time_limit_min').order('title'),
+    ]).then(([{ data: mats }, { data: qzs }]) => {
+      setMaterials((mats ?? []) as Material[])
+      setQuizzes((qzs ?? []) as Quiz[])
+      setLoading(false)
     })
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setUploadError('')
-    let videoUrl = form.video_url
-    let docUrl = form.doc_url
-    let docFilename = form.doc_filename
+  function getTabMaterials(): Array<{ id: string; title: string; subtitle: string; lessonType: 'video'|'doc'|'quiz'|'eval'; isQuiz?: boolean }> {
+    const matItems = materials
+      .filter(m => {
+        if (tab === 'video') return MAT_TYPE_GROUPS.video.includes(m.type)
+        if (tab === 'doc') return MAT_TYPE_GROUPS.doc.includes(m.type)
+        if (tab === 'eval') return MAT_TYPE_GROUPS.eval.includes(m.type)
+        if (tab === 'quiz') return false
+        return true // 'all' — include materials (not quizzes)
+      })
+      .filter(m => !search || m.title.toLowerCase().includes(search.toLowerCase()))
+      .map(m => ({
+        id: `mat-${m.id}`,
+        title: m.title,
+        subtitle: `${m.type}${m.size_text ? ` · ${m.size_text}` : ''}`,
+        lessonType: materialToLessonType(m.type) as 'video'|'doc'|'quiz'|'eval',
+        isQuiz: false,
+      }))
 
-    try {
-      setUploading(true)
-      if (videoFile) {
-        const path = `courses/${Date.now()}-${videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-        const { error } = await supabase.storage.from('course-videos').upload(path, videoFile, { upsert: true })
-        if (error) throw new Error(`Video upload failed: ${error.message}`)
-        videoUrl = supabase.storage.from('course-videos').getPublicUrl(path).data.publicUrl
-      }
-      if (docFile) {
-        const path = `lessons/${Date.now()}-${docFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-        const { error } = await supabase.storage.from('course-materials').upload(path, docFile, { upsert: true })
-        if (error) throw new Error(`Document upload failed: ${error.message}`)
-        docUrl = supabase.storage.from('course-materials').getPublicUrl(path).data.publicUrl
-        docFilename = docFile.name
-      }
-    } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : 'Upload failed')
-      setUploading(false)
-      return
-    }
+    const quizItems = (tab === 'quiz' || tab === 'all')
+      ? quizzes
+          .filter(q => !search || q.title.toLowerCase().includes(search.toLowerCase()))
+          .map(q => ({
+            id: `quiz-${q.id}`,
+            title: q.title,
+            subtitle: `Quiz · Pass ${q.pass_score}% · ${q.time_limit_min} min`,
+            lessonType: 'quiz' as const,
+            isQuiz: true,
+          }))
+      : []
 
-    setUploading(false)
-    onSave({
-      title: form.title,
-      type: form.type,
-      duration_text: form.duration_text,
-      requirement: form.requirement,
-      video_url: videoUrl || undefined,
-      doc_url: docUrl || undefined,
-      doc_filename: docFilename || undefined,
-      quiz_id: form.quiz_id || undefined,
+    return [...matItems, ...quizItems]
+  }
+
+  function toggleItem(item: ReturnType<typeof getTabMaterials>[0], mat?: Material, quiz?: Quiz) {
+    setSelected(prev => {
+      if (prev[item.id]) {
+        const next = { ...prev }
+        delete next[item.id]
+        return next
+      }
+      return {
+        ...prev,
+        [item.id]: {
+          materialId: mat ? mat.id : undefined,
+          quizId: quiz ? quiz.id : undefined,
+          title: item.title,
+          lessonType: item.lessonType,
+          duration: sharedDuration || defaultRequirement[item.lessonType] ? '' : '',
+          requirement: sharedReq || defaultRequirement[item.lessonType],
+        },
+      }
     })
   }
 
-  const defaultRequirement: Record<string, string> = {
-    video: 'Watch 90%', doc: 'Acknowledge read', quiz: 'Score ≥80%', eval: 'Complete all questions',
+  function handleSave() {
+    const items = Object.values(selected).map(s => ({
+      ...s,
+      duration: sharedDuration || s.duration,
+      requirement: sharedReq || s.requirement || defaultRequirement[s.lessonType],
+    }))
+    onSave(items)
   }
 
-  function handleTypeChange(t: 'video'|'doc'|'quiz'|'eval') {
-    set('type', t)
-    if (!form.requirement) set('requirement', defaultRequirement[t])
-  }
+  const displayItems = getTabMaterials()
+  const selectedCount = Object.keys(selected).length
 
   return (
-    <form className="modal-form" onSubmit={handleSubmit}>
-      <div className="form-group">
-        <label>Title</label>
-        <input value={form.title} onChange={e => set('title', e.target.value)} required />
-      </div>
-
-      <div className="form-row">
-        <div className="form-group">
-          <label>Type</label>
-          <select value={form.type} onChange={e => handleTypeChange(e.target.value as 'video'|'doc'|'quiz'|'eval')}>
-            <option value="video">Video</option>
-            <option value="doc">Document</option>
-            <option value="quiz">Quiz</option>
-            <option value="eval">Evaluation</option>
-          </select>
+    <div className="material-picker">
+      <div className="material-picker-header">
+        <p className="material-picker-hint">
+          Select one or more items from your library. Each item will become a lesson.
+        </p>
+        <div className="filter-chips" style={{ marginBottom: 8 }}>
+          {TYPE_TABS.map(t => (
+            <button key={t.key} className={`chip${tab === t.key ? ' active' : ''}`} onClick={() => setTab(t.key)}>
+              {t.label}
+            </button>
+          ))}
         </div>
-        <div className="form-group">
-          <label>Duration</label>
-          <input
-            value={form.duration_text}
-            placeholder={form.type === 'video' ? '12 min' : form.type === 'doc' ? '10 min read' : '15 min'}
-            onChange={e => set('duration_text', e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div className="form-group">
-        <label>Requirement</label>
         <input
-          value={form.requirement}
-          placeholder={defaultRequirement[form.type]}
-          onChange={e => set('requirement', e.target.value)}
+          className="search-input"
+          placeholder="Search materials…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
         />
       </div>
 
-      {form.type === 'video' && (
-        <div className="form-section">
-          <div className="form-section-label">Video Content</div>
-          <div className="form-group">
-            <label>Upload Video File</label>
-            <input
-              ref={videoRef}
-              type="file"
-              accept="video/*"
-              onChange={e => { setVideoFile(e.target.files?.[0] ?? null); set('video_url', '') }}
-            />
-            {videoFile && (
-              <div className="upload-preview">
-                <span>📹 {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)} MB)</span>
-                <button type="button" className="btn btn-sm btn-outline" onClick={() => { setVideoFile(null); if (videoRef.current) videoRef.current.value = '' }}>Remove</button>
-              </div>
-            )}
+      <div className="material-picker-list">
+        {loading ? (
+          <div className="loading-state">Loading library…</div>
+        ) : displayItems.length === 0 ? (
+          <div className="empty-state" style={{ padding: '24px 0' }}>
+            {search ? 'No matches found.' : 'No materials in this category yet. Upload some in the Materials Library first.'}
           </div>
-          {!videoFile && (
-            <div className="form-group">
-              <label>{initial?.video_url ? 'Replace video URL' : 'Or paste a video URL'}</label>
+        ) : displayItems.map(item => {
+          const mat = materials.find(m => `mat-${m.id}` === item.id)
+          const quiz = quizzes.find(q => `quiz-${q.id}` === item.id)
+          const isSelected = Boolean(selected[item.id])
+          return (
+            <label key={item.id} className={`material-picker-item${isSelected ? ' selected' : ''}`}>
               <input
-                type="url"
-                value={form.video_url}
-                placeholder="https://example.com/video.mp4"
-                onChange={e => set('video_url', e.target.value)}
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => toggleItem(item, mat, quiz)}
+                className="material-picker-check"
+              />
+              <span className="material-picker-icon">{MAT_TYPE_ICON[mat?.type ?? 'Quiz'] ?? '📎'}</span>
+              <div className="material-picker-info">
+                <span className="material-picker-title">{item.title}</span>
+                <span className="material-picker-subtitle">{item.subtitle}</span>
+              </div>
+              <span className={`badge badge-${item.lessonType === 'video' ? 'blue' : item.lessonType === 'doc' ? 'teal' : item.lessonType === 'quiz' ? 'amber' : 'purple'}`}>
+                {item.lessonType}
+              </span>
+            </label>
+          )
+        })}
+      </div>
+
+      {selectedCount > 0 && (
+        <div className="material-picker-footer">
+          <div className="material-picker-selected-count">
+            {selectedCount} item{selectedCount !== 1 ? 's' : ''} selected
+          </div>
+          <div className="form-row" style={{ margin: 0, gap: 8 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: 11 }}>Duration (optional, applies to all)</label>
+              <input
+                value={sharedDuration}
+                placeholder="e.g. 15 min"
+                onChange={e => setSharedDuration(e.target.value)}
+                style={{ padding: '5px 8px', fontSize: 12 }}
               />
             </div>
-          )}
-        </div>
-      )}
-
-      {form.type === 'doc' && (
-        <div className="form-section">
-          <div className="form-section-label">Document Content</div>
-          <div className="form-group">
-            <label>Upload Document</label>
-            <input
-              ref={docRef}
-              type="file"
-              accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
-              onChange={e => { setDocFile(e.target.files?.[0] ?? null); set('doc_url', '') }}
-            />
-            {docFile && (
-              <div className="upload-preview">
-                <span>📄 {docFile.name} ({(docFile.size / 1024 / 1024).toFixed(1)} MB)</span>
-                <button type="button" className="btn btn-sm btn-outline" onClick={() => { setDocFile(null); if (docRef.current) docRef.current.value = '' }}>Remove</button>
-              </div>
-            )}
-          </div>
-          {!docFile && (
-            <div className="form-group">
-              <label>{initial?.doc_url ? 'Replace document URL' : 'Or paste a document URL'}</label>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: 11 }}>Requirement (optional, applies to all)</label>
               <input
-                type="url"
-                value={form.doc_url}
-                placeholder="https://example.com/document.pdf"
-                onChange={e => set('doc_url', e.target.value)}
+                value={sharedReq}
+                placeholder="e.g. Watch 90%"
+                onChange={e => setSharedReq(e.target.value)}
+                style={{ padding: '5px 8px', fontSize: 12 }}
               />
             </div>
-          )}
-        </div>
-      )}
-
-      {form.type === 'quiz' && (
-        <div className="form-section">
-          <div className="form-section-label">Quiz</div>
-          <div className="form-group">
-            <label>Select Quiz</label>
-            <select value={form.quiz_id} onChange={e => set('quiz_id', e.target.value)}>
-              <option value="">— Choose a quiz —</option>
-              {quizzes.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
-            </select>
-            {quizzes.length === 0 && (
-              <span className="form-hint">No quizzes yet — create one in the Quizzes section first.</span>
-            )}
           </div>
         </div>
       )}
-
-      {uploadError && <div className="form-error">{uploadError}</div>}
 
       <div className="modal-form-actions">
-        <button type="submit" className="btn btn-primary" disabled={uploading}>
-          {uploading ? 'Uploading…' : initial ? 'Save Changes' : 'Add Lesson'}
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={selectedCount === 0}
+          onClick={handleSave}
+        >
+          Add {selectedCount > 0 ? selectedCount : ''} Lesson{selectedCount !== 1 ? 's' : ''}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── LessonEditForm — for editing an existing lesson ───────────────────────────
+
+function LessonEditForm({ initial, onSave }: { initial: Lesson; onSave: (d: Partial<Lesson>) => void }) {
+  const [title, setTitle] = useState(initial.title)
+  const [duration, setDuration] = useState(initial.duration_text)
+  const [requirement, setRequirement] = useState(initial.requirement)
+  return (
+    <form className="modal-form" onSubmit={e => { e.preventDefault(); onSave({ title, duration_text: duration, requirement }) }}>
+      <div className="form-group"><label>Title</label><input value={title} onChange={e => setTitle(e.target.value)} required /></div>
+      <div className="form-row">
+        <div className="form-group"><label>Duration</label><input value={duration} onChange={e => setDuration(e.target.value)} placeholder="e.g. 15 min" /></div>
+        <div className="form-group"><label>Requirement</label><input value={requirement} onChange={e => setRequirement(e.target.value)} placeholder="e.g. Watch 90%" /></div>
+      </div>
+      <div className="modal-form-actions"><button type="submit" className="btn btn-primary">Save Changes</button></div>
     </form>
   )
 }
