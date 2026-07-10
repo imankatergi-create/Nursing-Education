@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { AUDIT_LOGS } from '../data/constants'
 import type { AuditLog } from '../types'
 
 export default function AuditScreen() {
@@ -12,8 +11,7 @@ export default function AuditScreen() {
     ;(async () => {
       setLoading(true)
       const { data } = await supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(200)
-      if (data && data.length > 0) setLogs(data)
-      else setLogs(AUDIT_LOGS)
+      setLogs(data ?? [])
       setLoading(false)
     })()
   }, [])

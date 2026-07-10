@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import { NOTIFS } from '../data/constants'
 import type { Notification } from '../types'
 
 export default function NotificationsScreen() {
@@ -15,11 +14,7 @@ export default function NotificationsScreen() {
   async function fetchNotifs() {
     setLoading(true)
     const { data } = await supabase.from('notifications').select('*').order('sent_at', { ascending: false })
-    if (data && data.length > 0) {
-      setNotifs(data)
-    } else {
-      setNotifs(NOTIFS as any)
-    }
+    setNotifs(data ?? [])
     setLoading(false)
   }
 

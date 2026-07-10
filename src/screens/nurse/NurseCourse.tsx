@@ -1,32 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
-import { COURSES } from '../../data/constants'
 import type { Course, CourseModule, Lesson } from '../../types'
-
-const DEMO_MODULES: CourseModule[] = [
-  { id: 'm1', course_id: '', title: 'Module 1: Foundations', order_index: 1 },
-  { id: 'm2', course_id: '', title: 'Module 2: Core Procedures', order_index: 2 },
-  { id: 'm3', course_id: '', title: 'Module 3: Assessment', order_index: 3 },
-]
-
-const DEMO_LESSONS: Record<string, Lesson[]> = {
-  m1: [
-    { id: 'l1', module_id: 'm1', type: 'video', title: 'Introduction & Overview', duration_text: '12 min', requirement: 'Watch 90%', order_index: 1 },
-    { id: 'l2', module_id: 'm1', type: 'doc', title: 'Reference Guide (PDF)', duration_text: '10 min read', requirement: 'Acknowledge read', order_index: 2 },
-  ],
-  m2: [
-    { id: 'l3', module_id: 'm2', type: 'video', title: 'Step-by-Step Procedure', duration_text: '18 min', requirement: 'Watch 100%', order_index: 1 },
-    { id: 'l4', module_id: 'm2', type: 'doc', title: 'Protocol Checklist', duration_text: '5 min read', requirement: 'Download required', order_index: 2 },
-    { id: 'l5', module_id: 'm2', type: 'quiz', title: 'Knowledge Check Quiz', duration_text: '15 min', requirement: 'Score ≥80%', order_index: 3 },
-  ],
-  m3: [
-    { id: 'l6', module_id: 'm3', type: 'eval', title: 'Final Evaluation', duration_text: '30 min', requirement: 'Complete all questions', order_index: 1 },
-  ],
-}
-
-const ALL_LESSON_IDS = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']
-const TOTAL_LESSONS = ALL_LESSON_IDS.length
 
 interface LessonRow {
   lesson_key: string
@@ -45,15 +20,39 @@ type LessonStatus = 'done' | 'inprog' | 'todo' | 'locked'
 export default function NurseCourse() {
   const { params, navigate, profile } = useApp()
   const courseId = params.courseId ?? ''
-  const course = COURSES.find(c => c.id === courseId) ?? COURSES[0]
   const profileId = profile!.id
 
+  const [course, setCourse] = useState<Course | null>(null)
+  const [modules, setModules] = useState<CourseModule[]>([])
+  const [lessonsByModule, setLessonsByModule] = useState<Record<string, Lesson[]>>({})
+  const [allLessonIds, setAllLessonIds] = useState<string[]>([])
   const [progressMap, setProgressMap] = useState<Record<string, LessonRow>>({})
   const [loadingProgress, setLoadingProgress] = useState(true)
 
   useEffect(() => {
-    loadProgress()
-  }, [courseId, profileId])
+    loadCourseData()
+  }, [courseId])
+
+  useEffect(() => {
+    if (allLessonIds.length > 0) loadProgress()
+  }, [courseId, profileId, allLessonIds.length])
+
+  async function loadCourseData() {
+    const { data: c } = await supabase.from('courses').select('*').eq('id', courseId).maybeSingle()
+    setCourse(c ?? null)
+    const { data: mods } = await supabase.from('course_modules').select('*').eq('course_id', courseId).order('order_index')
+    const modList = mods ?? []
+    setModules(modList)
+    const map: Record<string, Lesson[]> = {}
+    const ids: string[] = []
+    for (const mod of modList) {
+      const { data: lsns } = await supabase.from('lessons').select('*').eq('module_id', mod.id).order('order_index')
+      map[mod.id] = lsns ?? []
+      for (const l of (lsns ?? [])) ids.push(l.id)
+    }
+    setLessonsByModule(map)
+    setAllLessonIds(ids)
+  }
 
   async function loadProgress() {
     setLoadingProgress(true)
@@ -67,7 +66,7 @@ export default function NurseCourse() {
       for (const row of data) map[row.lesson_key] = row
       setProgressMap(map)
 
-      const allDone = ALL_LESSON_IDS.every(id => map[id]?.completed)
+      const allDone = allLessonIds.length > 0 && allLessonIds.every(id => map[id]?.completed)
       if (allDone) await maybeIssueCertificate()
     }
     setLoadingProgress(false)
@@ -99,7 +98,7 @@ export default function NurseCourse() {
       cert_no: certNo,
       profile_id: profileId,
       course_id: courseId,
-      course_name: course.title,
+      course_name: course?.title ?? '',
       issued_at: new Date().toISOString(),
       score_pct: `${avgScore}%`,
       expiry_date: expiryDate.toISOString().split('T')[0],
@@ -117,10 +116,9 @@ export default function NurseCourse() {
   function getLessonStatus(id: string): LessonStatus {
     const p = progressMap[id]
     if (p?.completed) return 'done'
-    // Locked if previous lesson not yet completed
-    const idx = ALL_LESSON_IDS.indexOf(id)
+    const idx = allLessonIds.indexOf(id)
     if (idx > 0) {
-      const prev = progressMap[ALL_LESSON_IDS[idx - 1]]
+      const prev = progressMap[allLessonIds[idx - 1]]
       if (!prev?.completed) return 'locked'
     }
     if ((p?.watch_pct ?? 0) > 0 || (p?.doc_page ?? 1) > 1) return 'inprog'
@@ -172,8 +170,9 @@ export default function NurseCourse() {
     />
   )
 
-  const doneCount = ALL_LESSON_IDS.filter(id => progressMap[id]?.completed).length
-  const coursePct = Math.round((doneCount / TOTAL_LESSONS) * 100)
+  const totalLessons = allLessonIds.length
+  const doneCount = allLessonIds.filter(id => progressMap[id]?.completed).length
+  const coursePct = totalLessons > 0 ? Math.round((doneCount / totalLessons) * 100) : 0
 
   const typeIcon: Record<string, string> = { video: '🎬', doc: '📄', quiz: '❓', eval: '📝' }
   const statusIcon: Record<LessonStatus, string> = { done: '✅', inprog: '▶️', todo: '⭕', locked: '🔒' }
@@ -188,13 +187,13 @@ export default function NurseCourse() {
       <div className="course-hero">
         <div className="course-hero-icon" style={{ background: '#0891b2' }}>📚</div>
         <div className="course-hero-info">
-          <span className="course-code">{course.code}</span>
-          <h1 className="course-hero-title">{course.title}</h1>
+          <span className="course-code">{course?.code}</span>
+          <h1 className="course-hero-title">{course?.title ?? 'Loading…'}</h1>
           <div className="course-hero-meta">
-            <span>👨‍🏫 {course.instructor}</span>
-            <span>⏱ {course.duration}</span>
-            <span>📊 {course.level}</span>
-            <span>🌐 {course.lang}</span>
+            <span>👨‍🏫 {course?.instructor}</span>
+            <span>⏱ {course?.duration}</span>
+            <span>📊 {course?.level}</span>
+            <span>🌐 {course?.lang}</span>
           </div>
           <div className="course-hero-progress">
             <div className="bar-track" style={{ maxWidth: 300 }}>
@@ -203,23 +202,25 @@ export default function NurseCourse() {
             <span>
               {loadingProgress
                 ? 'Loading progress…'
-                : `${coursePct}% complete (${doneCount}/${TOTAL_LESSONS} lessons)`}
+                : `${coursePct}% complete (${doneCount}/${totalLessons} lessons)`}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="course-objectives">
-        <h3>Course Objectives</h3>
-        <ul>{course.objectives?.map((o, i) => <li key={i}>{o}</li>)}</ul>
-      </div>
+      {course?.objectives && course.objectives.length > 0 && (
+        <div className="course-objectives">
+          <h3>Course Objectives</h3>
+          <ul>{course.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>
+        </div>
+      )}
 
       <div className="syllabus-modules">
-        {DEMO_MODULES.map(mod => (
+        {modules.map(mod => (
           <div key={mod.id} className="module-block">
             <div className="module-header"><h3>{mod.title}</h3></div>
             <div className="lessons-list">
-              {(DEMO_LESSONS[mod.id] ?? []).map(lesson => {
+              {(lessonsByModule[mod.id] ?? []).map(lesson => {
                 const st = getLessonStatus(lesson.id)
                 const locked = st === 'locked'
                 const p = progressMap[lesson.id]
@@ -259,6 +260,9 @@ export default function NurseCourse() {
             </div>
           </div>
         ))}
+        {modules.length === 0 && !loadingProgress && (
+          <div className="empty-state">No syllabus content yet for this course.</div>
+        )}
       </div>
     </div>
   )
@@ -269,7 +273,7 @@ export default function NurseCourse() {
 function VideoPlayer({
   course, courseId, lessonId, profileId, initialProgress, onBack, onCompleted,
 }: {
-  course: Course
+  course: Course | null
   courseId: string
   lessonId: string
   profileId: string
@@ -287,7 +291,7 @@ function VideoPlayer({
   const alreadyCompleted = useRef(initialProgress >= 90)
   progressRef.current = progress
 
-  const hasRealVideo = Boolean(course.video_url)
+  const hasRealVideo = Boolean(course?.video_url)
 
   // ── Real video event handlers ──────────────────────────────────────────────
   function onTimeUpdate() {
@@ -397,7 +401,7 @@ function VideoPlayer({
           <div className="video-screen real-video">
             <video
               ref={videoRef}
-              src={course.video_url}
+              src={course?.video_url}
               className="real-video-el"
               onTimeUpdate={onTimeUpdate}
               onLoadedMetadata={onLoadedMetadata}
@@ -416,7 +420,7 @@ function VideoPlayer({
           <div className="video-screen">
             <div className="video-placeholder">
               <div className="video-placeholder-icon">🎬</div>
-              <div className="video-placeholder-title">{course.title}</div>
+              <div className="video-placeholder-title">{course?.title}</div>
               <div className="video-placeholder-sub">Introduction &amp; Overview</div>
             </div>
             <div className={`video-overlay${playing ? ' playing' : ''}`}>
@@ -609,7 +613,7 @@ function DocViewer({
 function QuizPlayer({
   course, courseId, lessonId, profileId, initialScore, onBack, onCompleted,
 }: {
-  course: Course
+  course: Course | null
   courseId: string
   lessonId: string
   profileId: string
@@ -685,7 +689,7 @@ function QuizPlayer({
         <div className="quiz-start-card">
           <div className="quiz-start-icon">📝</div>
           <h2>Knowledge Check Quiz</h2>
-          <p>{course.title}</p>
+          <p>{course?.title}</p>
           {initialScore != null && (
             <div className="quiz-prev-score">
               Previous best: <strong style={{ color: alreadyPassed ? 'var(--green)' : 'var(--red)' }}>

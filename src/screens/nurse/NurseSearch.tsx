@@ -1,22 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
-import { COURSES, MATERIALS } from '../../data/constants'
+import type { Course, Material } from '../../types'
 
 export default function NurseSearch() {
   const { params, navigate } = useApp()
   const [query, setQuery] = useState(params.q ?? '')
+  const [courses, setCourses] = useState<Course[]>([])
+  const [materials, setMaterials] = useState<Material[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const q = query.toLowerCase()
-  const matchCourses = q ? COURSES.filter(c => c.title.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || c.category.toLowerCase().includes(q)) : []
-  const matchMaterials = q ? MATERIALS.filter(m => m.title.toLowerCase().includes(q) || m.type.toLowerCase().includes(q)) : []
-  const total = matchCourses.length + matchMaterials.length
+  useEffect(() => {
+    if (!query) return
+    const t = setTimeout(doSearch, 300)
+    return () => clearTimeout(t)
+  }, [query])
+
+  async function doSearch() {
+    if (!query) return
+    setLoading(true)
+    const q = query.toLowerCase()
+    const [{ data: c }, { data: m }] = await Promise.all([
+      supabase.from('courses').select('*').ilike('title', `%${q}%`).limit(20),
+      supabase.from('materials').select('*').ilike('title', `%${q}%`).limit(20),
+    ])
+    setCourses(c ?? [])
+    setMaterials(m ?? [])
+    setLoading(false)
+  }
+
+  const total = courses.length + materials.length
 
   return (
     <div className="screen-container">
       <div className="screen-header">
         <div>
           <h1 className="screen-title">Search</h1>
-          <p className="screen-subtitle">{q ? `${total} results for "${q}"` : 'Search courses and materials'}</p>
+          <p className="screen-subtitle">{query ? `${total} results for "${query}"` : 'Search courses and materials'}</p>
         </div>
       </div>
 
@@ -31,12 +51,12 @@ export default function NurseSearch() {
         />
       </div>
 
-      {q && (
+      {query && !loading && (
         <>
-          {matchCourses.length > 0 && (
+          {courses.length > 0 && (
             <div className="card search-section">
               <h4 className="search-section-title">Courses</h4>
-              {matchCourses.map(c => (
+              {courses.map(c => (
                 <div key={c.id} className="search-result-item" onClick={() => navigate('ncourse', { courseId: c.id })}>
                   <div className="search-result-icon">📚</div>
                   <div>
@@ -49,15 +69,15 @@ export default function NurseSearch() {
             </div>
           )}
 
-          {matchMaterials.length > 0 && (
+          {materials.length > 0 && (
             <div className="card search-section">
               <h4 className="search-section-title">Materials</h4>
-              {matchMaterials.map(m => (
+              {materials.map(m => (
                 <div key={m.id} className="search-result-item">
                   <div className="search-result-icon">📎</div>
                   <div>
                     <div className="search-result-title">{m.title}</div>
-                    <div className="search-result-meta">{m.type} · {m.size_text}</div>
+                    <div className="search-result-meta">{m.type}{m.size_text ? ` · ${m.size_text}` : ''}</div>
                   </div>
                 </div>
               ))}
@@ -67,6 +87,7 @@ export default function NurseSearch() {
           {total === 0 && <div className="empty-state">No results for "{query}"</div>}
         </>
       )}
+      {loading && <div className="loading-state">Searching…</div>}
     </div>
   )
 }

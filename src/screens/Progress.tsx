@@ -21,27 +21,43 @@ export default function ProgressScreen() {
     if (!error && data && data.length > 0) {
       setNurses(data)
     } else {
-      // Fallback: fetch profiles + enrollments manually
-      const [profRes, enrRes, lpRes] = await Promise.all([
+      // Fallback: fetch profiles + enrollments + lesson progress manually
+      const [profRes, enrRes, lpRes, modsRes, lsnsRes] = await Promise.all([
         supabase.from('profiles').select('id,full_name,email,dept_id,unit_name,job_title,updated_at').eq('role', 'nurse').order('full_name'),
         supabase.from('nurse_enrollments').select('profile_id,status,due_date'),
         supabase.from('lesson_progress').select('profile_id,course_key,completed,quiz_score,updated_at'),
+        supabase.from('course_modules').select('id,course_id'),
+        supabase.from('lessons').select('id,module_id'),
       ])
       const enr = enrRes.data ?? []
       const lp = lpRes.data ?? []
+
+      // Build course_id -> total lesson count
+      const modToCourse: Record<string, string> = {}
+      for (const m of (modsRes.data ?? [])) modToCourse[m.id] = m.course_id
+      const lessonCounts: Record<string, number> = {}
+      for (const l of (lsnsRes.data ?? [])) {
+        const cid = modToCourse[l.module_id]
+        if (cid) lessonCounts[cid] = (lessonCounts[cid] ?? 0) + 1
+      }
 
       const rows: NurseProgress[] = (profRes.data ?? []).map(p => {
         const myEnr = enr.filter(e => e.profile_id === p.id)
         const myLp = lp.filter(l => l.profile_id === p.id)
 
-        // Group by course_key to compute completed courses
+        // Group lesson_progress by course_key
         const byCourse: Record<string, { total: number; done: number }> = {}
         for (const row of myLp) {
           if (!byCourse[row.course_key]) byCourse[row.course_key] = { total: 0, done: 0 }
           byCourse[row.course_key].total++
           if (row.completed) byCourse[row.course_key].done++
         }
-        const coursesDone = Object.values(byCourse).filter(v => v.done >= 6).length
+        // A course counts as "done" when completed lessons >= total lessons in that course
+        const coursesDone = Object.entries(byCourse).filter(([courseKey, v]) => {
+          const total = lessonCounts[courseKey] ?? 0
+          return total > 0 && v.done >= total
+        }).length
+
         const scores = myLp.filter(l => l.quiz_score != null).map(l => l.quiz_score as number)
         const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
         const overdue = myEnr.filter(e => e.due_date && new Date(e.due_date) < new Date() && e.status !== 'completed').length

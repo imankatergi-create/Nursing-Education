@@ -1,25 +1,37 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../context/AppContext'
-import { COURSES, CERTS, NOTIFS } from '../../data/constants'
+import type { Course, Certificate, Notification } from '../../types'
 
 export default function NurseDash() {
   const { profile, navigate } = useApp()
-  const [enrollments, setEnrollments] = useState({ assigned: 6, done: 4, overdue: 1, inprog: 1 })
+  const [enrollments, setEnrollments] = useState({ assigned: 0, done: 0, overdue: 0, inprog: 0 })
+  const [recentCourses, setRecentCourses] = useState<Course[]>([])
+  const [recentCerts, setRecentCerts] = useState<Certificate[]>([])
+  const [recentNotifs, setRecentNotifs] = useState<Notification[]>([])
 
   useEffect(() => {
+    if (!profile?.id) return
     ;(async () => {
-      const { data } = await supabase.from('nurse_enrollments').select('*').eq('profile_id', profile?.id ?? '')
-      if (data && data.length > 0) {
-        const done = data.filter((e: { status: string }) => e.status === 'completed').length
-        const overdue = data.filter((e: { status: string }) => e.status === 'overdue').length
-        const inprog = data.filter((e: { status: string }) => e.status === 'in_progress').length
-        setEnrollments({ assigned: data.length, done, overdue, inprog })
+      const [{ data: enroll }, { data: courses }, { data: certs }, { data: notifs }] = await Promise.all([
+        supabase.from('nurse_enrollments').select('status').eq('profile_id', profile.id),
+        supabase.from('courses').select('*').order('title').limit(4),
+        supabase.from('certificates').select('*').eq('profile_id', profile.id).order('issued_at', { ascending: false }).limit(2),
+        supabase.from('notifications').select('*').order('sent_at', { ascending: false }).limit(4),
+      ])
+      if (enroll) {
+        const done = enroll.filter(e => e.status === 'completed').length
+        const overdue = enroll.filter(e => e.status === 'overdue').length
+        const inprog = enroll.filter(e => e.status === 'in_progress').length
+        setEnrollments({ assigned: enroll.length, done, overdue, inprog })
       }
+      setRecentCourses(courses ?? [])
+      setRecentCerts(certs ?? [])
+      setRecentNotifs(notifs ?? [])
     })()
   }, [profile?.id])
 
-  const recentCerts = CERTS.slice(0, 2)
+  const thumbColors = ['#0891b2','#059669','#d97706','#dc2626']
 
   return (
     <div className="screen-container nurse-dash">
@@ -61,26 +73,20 @@ export default function NurseDash() {
             <button className="btn btn-sm" onClick={() => navigate('ncourses')}>View All</button>
           </div>
           <div className="nurse-course-list">
-            {COURSES.slice(0,4).map((c, i) => {
-              const statuses = ['in-progress','completed','not-started','overdue']
-              const pcts = [65, 100, 0, 20]
-              const status = statuses[i % statuses.length]
-              return (
-                <div key={c.id} className="nurse-course-row" onClick={() => navigate('ncourse', { courseId: c.id })}>
-                  <div className="nurse-course-icon" style={{ background: ['#0891b2','#059669','#d97706','#dc2626'][i % 4] + '20', color: ['#0891b2','#059669','#d97706','#dc2626'][i % 4] }}>
-                    {c.thumbnail_icon || '📚'}
-                  </div>
-                  <div className="nurse-course-info">
-                    <div className="nurse-course-title">{c.title}</div>
-                    <div className="nurse-course-meta">{c.duration} · {c.category}</div>
-                    <div className="bar-track sm" style={{ marginTop: 4 }}>
-                      <div className="bar-fill" style={{ width: `${pcts[i]}%`, background: status === 'overdue' ? 'var(--red)' : status === 'completed' ? 'var(--green)' : 'var(--teal)' }} />
-                    </div>
-                  </div>
-                  <span className={`badge ${status === 'completed' ? 'badge-green' : status === 'overdue' ? 'badge-red' : status === 'in-progress' ? 'badge-blue' : 'badge-gray'}`}>{status}</span>
+            {recentCourses.length === 0 ? (
+              <div className="empty-state">No courses yet</div>
+            ) : recentCourses.map((c, i) => (
+              <div key={c.id} className="nurse-course-row" onClick={() => navigate('ncourse', { courseId: c.id })}>
+                <div className="nurse-course-icon" style={{ background: thumbColors[i % 4] + '20', color: thumbColors[i % 4] }}>
+                  {c.thumbnail_icon || '📚'}
                 </div>
-              )
-            })}
+                <div className="nurse-course-info">
+                  <div className="nurse-course-title">{c.title}</div>
+                  <div className="nurse-course-meta">{c.duration} · {c.category}</div>
+                </div>
+                <span className="badge badge-gray">{c.status}</span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -98,7 +104,7 @@ export default function NurseDash() {
                 <div className="cert-mini-title">{cert.course_name}</div>
                 <div className="cert-mini-meta">Issued: {cert.issued_at} · Expires: {cert.expiry_date}</div>
               </div>
-              <span className={`badge ${cert.status === 'valid' ? 'badge-green' : 'badge-red'}`}>{cert.status}</span>
+              <span className={`badge ${cert.status === 'Valid' ? 'badge-green' : 'badge-red'}`}>{cert.status}</span>
             </div>
           ))}
         </div>
@@ -109,7 +115,9 @@ export default function NurseDash() {
             <button className="btn btn-sm" onClick={() => navigate('nnotifs')}>View All</button>
           </div>
           <div className="nurse-notif-list">
-            {NOTIFS.slice(0,4).map(n => (
+            {recentNotifs.length === 0 ? (
+              <div className="empty-state">No notifications</div>
+            ) : recentNotifs.map(n => (
               <div key={n.id} className={`nurse-notif-row${!n.read ? ' unread' : ''}`}>
                 <div className="nurse-notif-dot" style={{ opacity: n.read ? 0 : 1 }} />
                 <div className="nurse-notif-msg">{n.message}</div>
@@ -137,7 +145,7 @@ export default function NurseDash() {
             <div className="nurse-progress-stats">
               <div className="np-stat"><span>Completed</span><strong>{enrollments.done}</strong></div>
               <div className="np-stat"><span>In Progress</span><strong>{enrollments.inprog}</strong></div>
-              <div className="np-stat"><span>Not Started</span><strong>{enrollments.assigned - enrollments.done - enrollments.inprog - enrollments.overdue}</strong></div>
+              <div className="np-stat"><span>Not Started</span><strong>{Math.max(0, enrollments.assigned - enrollments.done - enrollments.inprog - enrollments.overdue)}</strong></div>
               <div className="np-stat" style={{ color:'var(--red)' }}><span>Overdue</span><strong>{enrollments.overdue}</strong></div>
             </div>
           </div>

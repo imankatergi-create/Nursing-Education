@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import { COURSES } from '../data/constants'
 import type { Course } from '../types'
 
 export default function CoursesScreen() {
@@ -16,8 +15,7 @@ export default function CoursesScreen() {
   async function fetchCourses() {
     setLoading(true)
     const { data } = await supabase.from('courses').select('*').order('title')
-    if (data && data.length > 0) setCourses(data)
-    else setCourses(COURSES)
+    setCourses(data ?? [])
     setLoading(false)
   }
 
@@ -175,6 +173,9 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
     video_url: '', video_filename: '', video_size_mb: 0, video_duration_sec: 0,
     ...initial,
   })
+  const [objectivesText, setObjectivesText] = useState(
+    Array.isArray(initial?.objectives) ? initial.objectives.join('\n') : ''
+  )
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -205,7 +206,6 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
     setUploadProgress(0)
     setUploadError('')
 
-    // Use a sanitized filename with timestamp to avoid collisions
     const safeName = `${Date.now()}-${videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const path = `courses/${safeName}`
 
@@ -234,13 +234,18 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
 
     if (videoFile) {
       const url = await uploadVideo()
-      if (!url) return  // upload failed, error already shown
+      if (!url) return
       videoUrl = url
       videoFilename = videoFile.name
       videoSizeMb = parseFloat((videoFile.size / 1024 / 1024).toFixed(2))
     }
 
-    onSave({ ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb })
+    const objectives = objectivesText
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+
+    onSave({ ...form, video_url: videoUrl, video_filename: videoFilename, video_size_mb: videoSizeMb, objectives })
   }
 
   const hasExistingVideo = !videoFile && form.video_url
@@ -276,8 +281,16 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
         <div className="form-group"><label>Duration</label><input value={form.duration} onChange={e => set('duration', e.target.value)} /></div>
         <div className="form-group"><label>Pass Rule</label><input value={form.pass_rule} onChange={e => set('pass_rule', e.target.value)} /></div>
       </div>
+      <div className="form-group">
+        <label>Objectives <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(one per line)</span></label>
+        <textarea
+          rows={4}
+          value={objectivesText}
+          onChange={e => setObjectivesText(e.target.value)}
+          placeholder="Understand infection control procedures&#10;Apply hand hygiene protocols&#10;Identify isolation requirements"
+        />
+      </div>
 
-      {/* ── Video Upload ─────────────────────────────────────────── */}
       <div className="form-section-title">Course Video</div>
       <div className="video-upload-area">
         {hasExistingVideo ? (
@@ -326,6 +339,12 @@ function CourseForm({ initial, onSave }: { initial?: Partial<Course>; onSave: (d
           </div>
         )}
         {uploadError && <div className="upload-error">{uploadError}</div>}
+      </div>
+
+      <div className="form-row" style={{ marginTop: 8 }}>
+        <div className="form-group checkbox-group" style={{ alignSelf: 'flex-end' }}>
+          <label><input type="checkbox" checked={!!form.mandatory} onChange={e => set('mandatory', e.target.checked)} /> Mandatory</label>
+        </div>
       </div>
 
       <div className="modal-form-actions">

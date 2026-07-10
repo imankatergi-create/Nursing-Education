@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import { DEPTS } from '../data/constants'
 
 interface DeptRow { id: string; name: string; supervisor?: string; active: boolean }
 
@@ -15,8 +14,7 @@ export default function DeptsScreen() {
   async function fetchDepts() {
     setLoading(true)
     const { data } = await supabase.from('departments').select('*').order('name')
-    if (data && data.length > 0) setDepts(data)
-    else setDepts(DEPTS.map((d, i) => ({ id: String(i), name: d.name, supervisor: d.supervisor, active: d.active })))
+    setDepts(data ?? [])
     setLoading(false)
   }
 

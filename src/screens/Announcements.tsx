@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import { ANNOUNCEMENTS } from '../data/constants'
 import type { Announcement } from '../types'
 
 export default function AnnouncementsScreen() {
@@ -14,8 +13,7 @@ export default function AnnouncementsScreen() {
   async function fetchAnnouncements() {
     setLoading(true)
     const { data } = await supabase.from('announcements').select('*').order('start_date', { ascending: false })
-    if (data && data.length > 0) setAnnouncements(data)
-    else setAnnouncements(ANNOUNCEMENTS)
+    setAnnouncements(data ?? [])
     setLoading(false)
   }
 

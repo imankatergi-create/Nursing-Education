@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import { EMAIL_TEMPLATES, REMINDER_RULES } from '../data/constants'
 import type { EmailTemplate, ReminderRule } from '../types'
 
 export default function SettingsScreen() {
@@ -18,10 +17,8 @@ export default function SettingsScreen() {
         supabase.from('reminder_rules').select('*'),
         supabase.from('app_settings').select('*'),
       ])
-      if (tmpl.data && tmpl.data.length > 0) setTemplates(tmpl.data)
-      else setTemplates(EMAIL_TEMPLATES)
-      if (rul.data && rul.data.length > 0) setRules(rul.data)
-      else setRules(REMINDER_RULES)
+      setTemplates(tmpl.data ?? [])
+      setRules(rul.data ?? [])
       if (sets.data) {
         const map: Record<string, string> = {}
         sets.data.forEach((s: { key: string; value: string }) => map[s.key] = s.value)

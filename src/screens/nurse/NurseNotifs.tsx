@@ -1,21 +1,38 @@
-import { useState } from 'react'
-import { NOTIFS } from '../../data/constants'
+import { useEffect, useState } from 'react'
+import { supabase } from '../../lib/supabase'
+import { useApp } from '../../context/AppContext'
 import type { Notification } from '../../types'
 
 export default function NurseNotifs() {
-  const [notifs, setNotifs] = useState<Notification[]>(NOTIFS)
+  const { profile } = useApp()
+  const [notifs, setNotifs] = useState<Notification[]>([])
+  const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all'|'unread'>('all')
 
-  const unreadCount = notifs.filter(n => !n.read).length
-  const filtered = filter === 'all' ? notifs : notifs.filter(n => !n.read)
+  useEffect(() => { fetchNotifs() }, [profile?.id])
 
-  function markRead(id: string) {
+  async function fetchNotifs() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('sent_at', { ascending: false })
+    setNotifs(data ?? [])
+    setLoading(false)
+  }
+
+  async function markRead(id: string) {
+    await supabase.from('notifications').update({ read: true }).eq('id', id)
     setNotifs(ns => ns.map(n => n.id === id ? { ...n, read: true } : n))
   }
 
-  function markAllRead() {
+  async function markAllRead() {
+    await supabase.from('notifications').update({ read: true }).eq('read', false)
     setNotifs(ns => ns.map(n => ({ ...n, read: true })))
   }
+
+  const unreadCount = notifs.filter(n => !n.read).length
+  const filtered = filter === 'all' ? notifs : notifs.filter(n => !n.read)
 
   const typeIcon: Record<string, string> = {
     'course_assignment': '📚', 'deadline': '⏰', 'certificate': '🎓', 'system': '⚙️',
@@ -42,8 +59,8 @@ export default function NurseNotifs() {
       </div>
 
       <div className="notif-list">
-        {filtered.map(n => (
-          <div key={n.id} className={`notif-full-item${!n.read ? ' unread' : ''}`} onClick={() => markRead(n.id)}>
+        {loading ? <div className="loading-state">Loading…</div> : filtered.map(n => (
+          <div key={n.id} className={`notif-full-item${!n.read ? ' unread' : ''}`} onClick={() => !n.read && markRead(n.id)}>
             <div className="notif-full-icon">{typeIcon[n.type] ?? '🔔'}</div>
             <div className="notif-full-body">
               <div className="notif-full-message">{n.message}</div>
@@ -56,7 +73,7 @@ export default function NurseNotifs() {
             {!n.read && <div className="notif-unread-dot" />}
           </div>
         ))}
-        {filtered.length === 0 && <div className="empty-state">No notifications</div>}
+        {!loading && filtered.length === 0 && <div className="empty-state">No notifications</div>}
       </div>
     </div>
   )

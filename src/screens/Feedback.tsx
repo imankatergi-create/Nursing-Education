@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { FEEDBACK_DATA } from '../data/constants'
 import type { Feedback } from '../types'
 
 export default function FeedbackScreen() {
@@ -11,8 +10,7 @@ export default function FeedbackScreen() {
     ;(async () => {
       setLoading(true)
       const { data } = await supabase.from('feedback').select('*').order('course_name')
-      if (data && data.length > 0) setFeedback(data)
-      else setFeedback(FEEDBACK_DATA)
+      setFeedback(data ?? [])
       setLoading(false)
     })()
   }, [])
