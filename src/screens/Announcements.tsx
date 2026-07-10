@@ -49,7 +49,7 @@ export default function AnnouncementsScreen() {
               <div>
                 <h3 className="announcement-title">{a.title}</h3>
                 <div className="announcement-meta">
-                  <span className={`badge ${priorityColor[a.priority] ?? 'badge-gray'}`}>{a.priority}</span>
+                  <span className={`badge ${priorityColor[a.priority.toLowerCase()] ?? 'badge-gray'}`}>{a.priority}</span>
                   <span className="announcement-audience">{a.audience_type}</span>
                   <span>{a.start_date} – {a.end_date}</span>
                 </div>

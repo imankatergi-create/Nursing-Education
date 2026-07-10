@@ -43,6 +43,19 @@ export default function NotificationsScreen() {
     'announcement': '📣', 'reminder': '🔔', 'completion': '✅',
   }
 
+  function getIcon(type: string): string {
+    const t = type.toLowerCase()
+    if (typeIcon[t]) return typeIcon[t]
+    if (t.includes('deadline') || t.includes('due')) return '⏰'
+    if (t.includes('assign') || t.includes('enroll') || t.includes('course')) return '📚'
+    if (t.includes('cert') || t.includes('complet') || t.includes('pass')) return '🎓'
+    if (t.includes('quiz') || t.includes('exam') || t.includes('score')) return '📝'
+    if (t.includes('material') || t.includes('document') || t.includes('policy')) return '📄'
+    if (t.includes('announc')) return '📣'
+    if (t.includes('reminder')) return '🔔'
+    return '🔔'
+  }
+
   function openSend() {
     openModal({ title: 'Send Notification', wide: true,
       body: <SendForm onSave={async d => {
@@ -77,7 +90,7 @@ export default function NotificationsScreen() {
       <div className="notif-list">
         {loading ? <div className="loading-state">Loading…</div> : filtered.map(n => (
           <div key={n.id} className={`notif-full-item${!n.read ? ' unread' : ''}`} onClick={() => !n.read && markRead(n.id)}>
-            <div className="notif-full-icon">{typeIcon[n.type] ?? '🔔'}</div>
+            <div className="notif-full-icon">{getIcon(n.type)}</div>
             <div className="notif-full-body">
               <div className="notif-full-message">{n.message}</div>
               <div className="notif-full-meta">
