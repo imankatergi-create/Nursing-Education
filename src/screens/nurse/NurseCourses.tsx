@@ -22,24 +22,42 @@ export default function NurseCourses() {
 
   async function loadAll() {
     setLoading(true)
-    const [{ data: c }, { data: p }, { data: mods }, { data: lsns }] = await Promise.all([
+    const [{ data: c }, { data: p }, { data: mods }, { data: lsns }, { data: cs }] = await Promise.all([
       supabase.from('courses').select('*').order('title'),
       profile?.id
         ? supabase.from('lesson_progress').select('course_key, completed').eq('profile_id', profile.id)
         : Promise.resolve({ data: [] }),
-      supabase.from('course_modules').select('id, course_id'),
+      supabase.from('course_modules').select('id, course_id, syllabus_id'),
       supabase.from('lessons').select('id, module_id'),
+      supabase.from('course_syllabuses').select('course_id, syllabus_id'),
     ])
 
     setCourses(c ?? [])
 
-    // Build course_id -> total lesson count from modules + lessons
-    const modToCourse: Record<string, string> = {}
-    for (const m of (mods ?? [])) modToCourse[m.id] = m.course_id
+    // Build syllabus_id -> [course_ids] from the junction table
+    const sylToCourses: Record<string, string[]> = {}
+    for (const row of (cs ?? [])) {
+      if (!sylToCourses[row.syllabus_id]) sylToCourses[row.syllabus_id] = []
+      sylToCourses[row.syllabus_id].push(row.course_id)
+    }
+
+    // Build module_id -> Set<course_id> via direct course_id AND via linked syllabuses
+    const modToCourses: Record<string, Set<string>> = {}
+    for (const m of (mods ?? [])) {
+      if (!modToCourses[m.id]) modToCourses[m.id] = new Set()
+      if (m.course_id) modToCourses[m.id].add(m.course_id)
+      if (m.syllabus_id && sylToCourses[m.syllabus_id]) {
+        for (const cid of sylToCourses[m.syllabus_id]) modToCourses[m.id].add(cid)
+      }
+    }
+
+    // Count unique lessons per course (Set prevents double-counting)
     const totals: Record<string, number> = {}
     for (const l of (lsns ?? [])) {
-      const cid = modToCourse[l.module_id]
-      if (cid) totals[cid] = (totals[cid] ?? 0) + 1
+      const courseIds = modToCourses[l.module_id]
+      if (courseIds) {
+        for (const cid of courseIds) totals[cid] = (totals[cid] ?? 0) + 1
+      }
     }
     setLessonTotals(totals)
 
@@ -65,7 +83,7 @@ export default function NurseCourses() {
     const done = progressMap[courseId]?.done ?? 0
     const total = lessonTotals[courseId] ?? 0
     if (total === 0) return 0
-    return Math.round((done / total) * 100)
+    return Math.min(100, Math.round((done / total) * 100))
   }
 
   const filtered = courses.filter(c => {
