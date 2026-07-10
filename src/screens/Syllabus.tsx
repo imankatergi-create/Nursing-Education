@@ -342,18 +342,24 @@ function LessonForm({
                   overflow: 'hidden',
                   background: sel ? '#f0f9ff' : '#ffffff',
                   cursor: 'pointer',
+                  userSelect: 'none',
                 }}
                 onClick={() => toggleMat(m.id)}
               >
-                {/* Row: checkbox + title */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px' }}>
-                  <input
-                    type="checkbox"
-                    checked={sel}
-                    onChange={() => toggleMat(m.id)}
-                    onClick={e => e.stopPropagation()}
-                  />
-                  <div style={{ flex: 1 }}>
+                  {/* Custom checkbox — bypasses all native input CSS issues */}
+                  <div style={{
+                    width: 18, height: 18, minWidth: 18, minHeight: 18,
+                    border: `2px solid ${sel ? '#0891b2' : '#94a3b8'}`,
+                    borderRadius: 4,
+                    background: sel ? '#0891b2' : '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                    fontSize: 12, color: '#fff', fontWeight: 700, lineHeight: 1,
+                  }}>
+                    {sel ? '✓' : ''}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', lineHeight: 1.3 }}>{m.title}</div>
                     <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
                       {m.type}{m.size_text ? ` · ${m.size_text}` : ''}
@@ -370,7 +376,6 @@ function LessonForm({
                   )}
                 </div>
 
-                {/* Expanded config when selected */}
                 {sel && (
                   <div
                     style={{ borderTop: '1px solid #bae6fd', padding: '10px 14px', background: '#f0f9ff' }}
