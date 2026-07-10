@@ -88,8 +88,13 @@ export default function UsersScreen() {
           initial={u}
           depts={depts}
           onSave={async (data) => {
-            await supabase.from('profiles').update(data).eq('id', u.id)
-            fetchUsers()
+            // Strip read-only/system fields — sending id or last_login in the
+            // payload causes PostgREST to attempt a PK update which silently
+            // prevents the row from being committed.
+            const { id: _id, email: _email, last_login: _ll, ...updateData } = data as UserRow & { last_login?: string }
+            const { error } = await supabase.from('profiles').update(updateData).eq('id', u.id)
+            if (error) { toast(`Error: ${error.message}`); return }
+            await fetchUsers()
             closeModal()
             toast('User updated')
           }}

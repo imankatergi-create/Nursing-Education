@@ -286,6 +286,20 @@ a{color:var(--teal)}
 /* Programs */
 .programs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .program-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 16px; box-shadow: var(--shadow); }
+.program-enrollment-summary { display: flex; gap: 16px; margin: 10px 0 6px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+.program-enroll-stat { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.program-enroll-val { font-size: 20px; font-weight: 700; color: var(--teal); line-height: 1; }
+.program-enroll-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* Enrolled staff view */
+.enrolled-staff-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.enrolled-staff-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.enrolled-staff-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; flex-shrink: 0; }
+.enrolled-course-statuses { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.enrolled-course-chip { display: flex; align-items: center; gap: 4px; padding: 3px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 20px; font-size: 11px; color: var(--text); }
+
+.alert-box { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+.alert-amber { background: #fffbeb; border: 1px solid #f59e0b; color: #92400e; }
 .program-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
 .program-code { font-size: 11px; font-weight: 700; color: var(--teal); text-transform: uppercase; letter-spacing: .5px; }
 .program-title { font-size: 14px; font-weight: 700; margin-top: 2px; }

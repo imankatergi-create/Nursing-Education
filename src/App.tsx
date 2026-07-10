@@ -47,6 +47,8 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    let profileChannel: ReturnType<typeof supabase.channel> | null = null
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) loadProfile(session.user.id)
       else setLoading(false)
@@ -54,11 +56,32 @@ export default function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       ;(async () => {
-        if (session?.user) await loadProfile(session.user.id)
-        else { setProfile(null); setLoading(false) }
+        if (session?.user) {
+          await loadProfile(session.user.id)
+
+          // Subscribe to real-time changes on own profile row so role/status
+          // updates by an admin are reflected without requiring a re-login.
+          if (profileChannel) supabase.removeChannel(profileChannel)
+          profileChannel = supabase
+            .channel(`profile:${session.user.id}`)
+            .on(
+              'postgres_changes',
+              { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${session.user.id}` },
+              (payload) => setProfile(payload.new as Profile)
+            )
+            .subscribe()
+        } else {
+          if (profileChannel) { supabase.removeChannel(profileChannel); profileChannel = null }
+          setProfile(null)
+          setLoading(false)
+        }
       })()
     })
-    return () => subscription.unsubscribe()
+
+    return () => {
+      subscription.unsubscribe()
+      if (profileChannel) supabase.removeChannel(profileChannel)
+    }
   }, [])
 
   async function loadProfile(uid: string) {
