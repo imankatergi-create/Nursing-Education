@@ -46,7 +46,9 @@ const ROLE_SCREENS: Record<string, Screen[]> = {
 export default function Sidebar({ isNursePortal, open, onClose }: { isNursePortal: boolean; open: boolean; onClose: () => void }) {
   const { screen, navigate, profile, role } = useApp()
   const allowedScreens = ROLE_SCREENS[role] ?? []
-  const navItems = isNursePortal ? NURSE_NAV : CMS_NAV.filter(n => allowedScreens.includes(n.screen))
+  const navItems = (isNursePortal || role === 'nurse')
+    ? NURSE_NAV
+    : CMS_NAV.filter(n => allowedScreens.includes(n.screen))
 
   return (
     <aside className={`sidebar${open ? ' sidebar-open' : ''}`}>

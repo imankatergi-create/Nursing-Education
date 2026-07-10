@@ -64,6 +64,7 @@ export default function App() {
   async function loadProfile(uid: string) {
     const { data } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
     setProfile(data)
+    if (data?.role === 'nurse') setScreen('ndash')
     setLoading(false)
   }
 
