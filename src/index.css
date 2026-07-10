@@ -11,7 +11,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--ink);font-size:14p
 button{font-family:inherit;cursor:pointer}
 input:not([type=checkbox]):not([type=radio]),select,textarea{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--ink);width:100%}
 input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{outline:2px solid var(--teal);outline-offset:0;border-color:var(--teal)}
-input[type=checkbox],input[type=radio]{width:16px;height:16px;cursor:pointer;accent-color:var(--teal);flex-shrink:0}
+input[type=checkbox],input[type=radio]{appearance:auto;-webkit-appearance:auto;width:16px;height:16px;min-width:16px;min-height:16px;cursor:pointer;accent-color:var(--teal);flex-shrink:0;padding:0;border:none;background:transparent;border-radius:0;vertical-align:middle}
 label{font-size:11.5px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px}
 h1{font-size:21px;font-weight:700;letter-spacing:-.2px}
 h2{font-size:16px;font-weight:700}

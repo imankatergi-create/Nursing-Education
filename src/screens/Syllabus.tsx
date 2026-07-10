@@ -350,7 +350,7 @@ function LessonForm({
                   <input
                     type="checkbox"
                     checked={sel}
-                    onChange={() => {}}
+                    onChange={() => toggleMat(m.id)}
                     onClick={e => e.stopPropagation()}
                   />
                   <div style={{ flex: 1 }}>
