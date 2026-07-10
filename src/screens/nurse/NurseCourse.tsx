@@ -532,6 +532,9 @@ interface LinkedMaterial {
   size_text: string
 }
 
+// Minimum seconds required before acknowledge unlocks (encourages reading)
+const MIN_READ_SECONDS = 30
+
 function DocViewer({
   courseId, lessonId, profileId, initialAcked, onBack, onCompleted,
 }: {
@@ -548,6 +551,7 @@ function DocViewer({
   const [activeIdx, setActiveIdx] = useState(0)
   const [acked, setAcked] = useState(initialAcked)
   const [loading, setLoading] = useState(true)
+  const [secondsRead, setSecondsRead] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -565,6 +569,13 @@ function DocViewer({
     }
     load()
   }, [lessonId])
+
+  // Reading timer — counts up while user is on this view
+  useEffect(() => {
+    if (acked) return
+    const t = setInterval(() => setSecondsRead(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [acked])
 
   async function saveProgress(acknowledged: boolean, completed: boolean) {
     await supabase.from('lesson_progress').upsert({
@@ -587,6 +598,8 @@ function DocViewer({
   }
 
   const mat = materials[activeIdx] ?? null
+  const readPct = Math.min(100, Math.round((secondsRead / MIN_READ_SECONDS) * 100))
+  const readyToAck = acked || readPct >= 100
 
   const typeIcon: Record<string, string> = {
     PDF: '📄', Video: '🎬', PPT: '📊', Checklist: '✅',
@@ -599,66 +612,28 @@ function DocViewer({
     const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
     const type = mat.type.toLowerCase()
 
-    const isPdf = type === 'pdf' || ext === 'pdf'
-    const isImage = type === 'image' || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)
-    const isAudio = type === 'audio' || ['mp3','wav','ogg','m4a'].includes(ext)
-    const isVideo = type === 'video' || ['mp4','webm','mov'].includes(ext)
+    if (type === 'image' || ['png','jpg','jpeg','gif','webp','svg'].includes(ext)) {
+      return (
+        <img src={url} alt={mat.title} style={{ maxWidth: '100%', borderRadius: 8, display: 'block', margin: '0 auto', boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
+      )
+    }
+    if (type === 'audio' || ['mp3','wav','ogg','m4a'].includes(ext)) {
+      return <audio controls src={url} style={{ width: '100%' }} />
+    }
+    if (type === 'video' || ['mp4','webm','mov'].includes(ext)) {
+      return <video controls src={url} style={{ width: '100%', borderRadius: 8 }} />
+    }
 
-    if (isPdf) {
-      return (
-        <object
-          data={url}
-          type="application/pdf"
-          style={{ width: '100%', height: 640, borderRadius: 8, border: '1px solid var(--border)', display: 'block' }}
-        >
-          {/* fallback if browser can't embed */}
-          <div style={{ padding: '32px', textAlign: 'center', background: 'var(--surface)', borderRadius: 8 }}>
-            <div style={{ marginBottom: 8, color: 'var(--muted)', fontSize: 14 }}>
-              Your browser cannot display this PDF inline.
-            </div>
-            <a href={url} target="_blank" rel="noreferrer" className="btn btn-primary">
-              Open PDF
-            </a>
-          </div>
-        </object>
-      )
-    }
-    if (isImage) {
-      return (
-        <div style={{ textAlign: 'center', padding: '16px 0' }}>
-          <img src={url} alt={mat.title} style={{ maxWidth: '100%', maxHeight: 560, borderRadius: 8, boxShadow: '0 2px 12px rgba(0,0,0,0.1)' }} />
-        </div>
-      )
-    }
-    if (isAudio) {
-      return (
-        <div style={{ padding: '24px 0' }}>
-          <audio controls src={url} style={{ width: '100%' }} />
-        </div>
-      )
-    }
-    if (isVideo) {
-      return (
-        <div style={{ padding: '16px 0' }}>
-          <video controls src={url} style={{ width: '100%', borderRadius: 8 }} />
-        </div>
-      )
-    }
-    // PPT, Word, etc. — embed via Google Docs Viewer
-    const docsUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`
+    // PDF, PPT, Word, Protocol, Checklist, any other doc → Google Docs Viewer
+    const viewerUrl = `https://docs.google.com/viewer?embedded=true&url=${encodeURIComponent(url)}`
     return (
-      <div>
-        <iframe
-          src={docsUrl}
-          title={mat.title}
-          style={{ width: '100%', height: 600, border: '1px solid var(--border)', borderRadius: 8, display: 'block' }}
-        />
-        <div style={{ marginTop: 8, textAlign: 'right' }}>
-          <a href={url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline">
-            Download original
-          </a>
-        </div>
-      </div>
+      <iframe
+        key={viewerUrl}
+        src={viewerUrl}
+        title={mat.title}
+        style={{ width: '100%', height: 660, border: 'none', borderRadius: 8, display: 'block', background: '#fff' }}
+        allowFullScreen
+      />
     )
   }
 
@@ -671,7 +646,7 @@ function DocViewer({
   }
 
   return (
-    <div className="screen-container">
+    <div className="screen-container" style={{ paddingBottom: 100 }}>
       <div className="back-nav">
         <button className="btn btn-sm btn-outline" onClick={onBack}>← Back to Course</button>
       </div>
@@ -698,58 +673,90 @@ function DocViewer({
             <div style={{ fontSize: 48, marginBottom: 12 }}>📄</div>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>No document attached yet</div>
             <div style={{ color: 'var(--muted)', fontSize: 14 }}>
-              An educator hasn't linked a material to this lesson. Check back later.
+              An educator hasn't linked a material to this lesson.
             </div>
           </div>
         ) : (
           <>
+            {/* Material info bar */}
             {mat && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <span style={{ fontSize: 18 }}>{typeIcon[mat.type] ?? '📎'}</span>
-                  <span style={{ fontWeight: 600 }}>{mat.title}</span>
-                  {mat.size_text && <span style={{ color: 'var(--muted)', fontSize: 13 }}>{mat.size_text}</span>}
-                  {mat.file_url && (
-                    <a href={mat.file_url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline" style={{ marginLeft: 'auto' }}>
-                      Open in new tab
-                    </a>
-                  )}
-                </div>
-                {renderViewer()}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', borderBottom: '1px solid var(--border)', marginBottom: 12 }}>
+                <span style={{ fontSize: 18 }}>{typeIcon[mat.type] ?? '📎'}</span>
+                <span style={{ fontWeight: 600 }}>{mat.title}</span>
+                {mat.size_text && <span style={{ color: 'var(--muted)', fontSize: 13 }}>{mat.size_text}</span>}
+                {mat.file_url && (
+                  <a href={mat.file_url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline" style={{ marginLeft: 'auto' }}>
+                    Download
+                  </a>
+                )}
               </div>
             )}
 
-            {/* Acknowledgement — always visible regardless of viewer type */}
-            <div style={{
-              marginTop: 24,
-              padding: '20px 24px',
-              borderRadius: 10,
-              border: acked ? '1.5px solid var(--green)' : '1.5px solid var(--teal)',
-              background: acked ? 'var(--green-t)' : 'var(--teal-t)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 16,
-              flexWrap: 'wrap',
-            }}>
-              {acked ? (
-                <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 14 }}>
-                  ✅ Document acknowledged on {new Date().toLocaleDateString()}
-                </span>
-              ) : (
-                <>
-                  <span style={{ fontSize: 14, color: 'var(--text)', flex: 1 }}>
-                    I confirm I have read and understood this material and will comply with all requirements.
-                  </span>
-                  <button className="btn btn-primary" onClick={handleAcknowledge} style={{ flexShrink: 0 }}>
-                    Acknowledge &amp; Complete
-                  </button>
-                </>
-              )}
-            </div>
+            {/* Document viewer */}
+            {mat && renderViewer()}
           </>
         )}
       </div>
+
+      {/* ── Sticky acknowledgement bar ── */}
+      {materials.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: acked ? '#f0fdf4' : '#fff',
+          borderTop: `2px solid ${acked ? 'var(--green)' : readyToAck ? 'var(--teal)' : 'var(--border)'}`,
+          padding: '12px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 100,
+          boxShadow: '0 -2px 12px rgba(0,0,0,0.08)',
+          flexWrap: 'wrap',
+        }}>
+          {/* Reading progress */}
+          {!acked && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 200 }}>
+              <span style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                Reading: {secondsRead}s
+              </span>
+              <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${readPct}%`,
+                  background: readyToAck ? 'var(--green)' : 'var(--teal)',
+                  borderRadius: 4,
+                  transition: 'width 0.5s ease',
+                }} />
+              </div>
+              <span style={{ fontSize: 12, color: readyToAck ? 'var(--green)' : 'var(--muted)', whiteSpace: 'nowrap', fontWeight: readyToAck ? 700 : 400 }}>
+                {readyToAck ? 'Ready' : `${MIN_READ_SECONDS - secondsRead}s left`}
+              </span>
+            </div>
+          )}
+
+          {acked ? (
+            <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 14 }}>
+              ✅ Document acknowledged on {new Date().toLocaleDateString()}
+            </span>
+          ) : (
+            <>
+              <span style={{ fontSize: 13, color: 'var(--text)' }}>
+                I have read and understood this document and will comply with all requirements.
+              </span>
+              <button
+                className="btn btn-primary"
+                onClick={handleAcknowledge}
+                style={{ flexShrink: 0, opacity: readyToAck ? 1 : 0.5 }}
+                title={readyToAck ? undefined : `Please read the document for ${MIN_READ_SECONDS - secondsRead} more seconds`}
+              >
+                Acknowledge &amp; Complete
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
