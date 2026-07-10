@@ -114,13 +114,18 @@ export default function SyllabusScreen() {
       title: 'Add Lesson', wide: true,
       body: <LessonForm onSave={async (d, matConfigs) => {
         const count = (lessons[moduleId] ?? []).length
-        const { data: created } = await supabase
+        const payload: Record<string, unknown> = { ...d, module_id: moduleId, order_index: count + 1 }
+        if (!payload.quiz_id) delete payload.quiz_id
+        const { data: created, error } = await supabase
           .from('lessons')
-          .insert({ ...d, module_id: moduleId, order_index: count + 1 })
+          .insert(payload)
           .select('id')
           .maybeSingle()
+        if (error) { toast('Error saving lesson: ' + error.message); return }
         if (created?.id) await saveLessonMaterials(created.id, matConfigs)
-        if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson added')
+        if (selectedCourse) loadCourse(selectedCourse)
+        closeModal()
+        toast('Lesson added')
       }} />,
     })
   }
@@ -129,9 +134,14 @@ export default function SyllabusScreen() {
     openModal({
       title: 'Edit Lesson', wide: true,
       body: <LessonForm initial={lesson} onSave={async (d, matConfigs) => {
-        await supabase.from('lessons').update(d).eq('id', lesson.id)
+        const payload: Record<string, unknown> = { ...d }
+        if (!payload.quiz_id) payload.quiz_id = null
+        const { error } = await supabase.from('lessons').update(payload).eq('id', lesson.id)
+        if (error) { toast('Error updating lesson: ' + error.message); return }
         await saveLessonMaterials(lesson.id, matConfigs)
-        if (selectedCourse) loadCourse(selectedCourse); closeModal(); toast('Lesson updated')
+        if (selectedCourse) loadCourse(selectedCourse)
+        closeModal()
+        toast('Lesson updated')
       }} />,
     })
   }
