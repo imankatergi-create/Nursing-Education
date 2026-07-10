@@ -113,6 +113,7 @@ export interface Material {
   avg_time?: string
   completion_pct: number
 }
+  file_url?: string
 
 export interface MaterialVersion {
   id: string

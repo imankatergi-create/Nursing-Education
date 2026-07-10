@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../context/AppContext'
-import { MATERIALS } from '../data/constants'
 import type { Material } from '../types'
 
 export default function MaterialsScreen() {
@@ -16,8 +15,7 @@ export default function MaterialsScreen() {
   async function fetchMaterials() {
     setLoading(true)
     const { data } = await supabase.from('materials').select('*').order('title')
-    if (data && data.length > 0) setMaterials(data)
-    else setMaterials(MATERIALS)
+    setMaterials(data ?? [])
     setLoading(false)
   }
 
@@ -32,15 +30,26 @@ export default function MaterialsScreen() {
 
   function openAdd() {
     openModal({ title: 'Upload Material', wide: true,
-      body: <MaterialForm onSave={async d => { await supabase.from('materials').insert(d); fetchMaterials(); closeModal(); toast('Material uploaded') }} />
+      body: <MaterialForm onSave={async d => {
+        await supabase.from('materials').insert(d)
+        fetchMaterials(); closeModal(); toast('Material uploaded')
+      }} />
+    })
+  }
+
+  function openEdit(m: Material) {
+    openModal({ title: 'Edit Material', wide: true,
+      body: <MaterialForm initial={m} onSave={async d => {
+        await supabase.from('materials').update(d).eq('id', m.id)
+        fetchMaterials(); closeModal(); toast('Material updated')
+      }} />
     })
   }
 
   async function deleteMaterial(m: Material) {
     if (!confirm(`Delete material "${m.title}"? This cannot be undone.`)) return
-    if ((m as Material & { file_url?: string }).file_url) {
-      const url = (m as Material & { file_url?: string }).file_url!
-      const path = url.split('/course-materials/')[1]
+    if (m.file_url) {
+      const path = m.file_url.split('/course-materials/')[1]
       if (path) await supabase.storage.from('course-materials').remove([path])
     }
     await supabase.from('materials').delete().eq('id', m.id)
@@ -69,11 +78,13 @@ export default function MaterialsScreen() {
         <div className="table-wrap">
           <table className="data-table">
             <thead>
-              <tr><th>Material</th><th>Type</th><th>Course</th><th>Version</th><th>Uploaded By</th><th>Views</th><th>Completion</th><th>Mandatory</th><th>Actions</th></tr>
+              <tr><th>Material</th><th>Type</th><th>Version</th><th>Uploaded By</th><th>Views</th><th>Completion</th><th>Mandatory</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} className="table-loading">Loading…</td></tr>
+                <tr><td colSpan={8} className="table-loading">Loading…</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={8} className="table-loading">No materials found.</td></tr>
               ) : filtered.map(m => (
                 <tr key={m.id}>
                   <td>
@@ -86,7 +97,6 @@ export default function MaterialsScreen() {
                     </div>
                   </td>
                   <td><span className={`badge ${typeColor[m.type] ?? 'badge-gray'}`}>{m.type}</span></td>
-                  <td>{m.course_id}</td>
                   <td>{m.latest_version}</td>
                   <td>{m.uploaded_by}</td>
                   <td>{m.views}</td>
@@ -99,12 +109,12 @@ export default function MaterialsScreen() {
                   <td>{m.mandatory ? <span className="badge badge-red">Yes</span> : <span className="badge badge-gray">No</span>}</td>
                   <td>
                     <div className="action-btns">
-                      {(m as Material & { file_url?: string }).file_url ? (
-                        <a href={(m as Material & { file_url?: string }).file_url} target="_blank" rel="noreferrer" className="btn btn-sm">Preview</a>
+                      {m.file_url ? (
+                        <a href={m.file_url} target="_blank" rel="noreferrer" className="btn btn-sm">Preview</a>
                       ) : (
                         <button className="btn btn-sm" disabled>Preview</button>
                       )}
-                      <button className="btn btn-sm btn-outline" onClick={() => openModal({ title: m.title, wide: true, body: <MaterialVersions material={m} /> })}>Versions</button>
+                      <button className="btn btn-sm btn-outline" onClick={() => openEdit(m)}>Edit</button>
                       <button className="btn btn-sm btn-danger" onClick={() => deleteMaterial(m)}>Delete</button>
                     </div>
                   </td>
@@ -118,19 +128,20 @@ export default function MaterialsScreen() {
   )
 }
 
-function MaterialVersions({ material }: { material: Material }) {
-  return (
-    <div>
-      <div className="detail-row"><strong>Current Version:</strong> {material.latest_version}</div>
-      <div className="detail-row"><strong>Total Views:</strong> {material.views}</div>
-      <div className="detail-row"><strong>Tracking:</strong> {material.tracking_rule}</div>
-      <div className="detail-row"><strong>Downloadable:</strong> {material.downloadable ? 'Yes' : 'No'}</div>
-    </div>
-  )
-}
-
-function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?: string }) => void }) {
-  const [form, setForm] = useState({ title: '', type: 'PDF', latest_version: 'v1.0', uploaded_by: '', mandatory: false, downloadable: true, tracking_rule: 'View only', completion_pct: 0, views: 0 })
+function MaterialForm({ initial, onSave }: { initial?: Material; onSave: (d: Partial<Material>) => void }) {
+  const [form, setForm] = useState({
+    title: initial?.title ?? '',
+    type: initial?.type ?? 'PDF',
+    latest_version: initial?.latest_version ?? 'v1.0',
+    uploaded_by: initial?.uploaded_by ?? '',
+    mandatory: initial?.mandatory ?? false,
+    downloadable: initial?.downloadable ?? true,
+    tracking_rule: initial?.tracking_rule ?? 'View only',
+    completion_pct: initial?.completion_pct ?? 0,
+    views: initial?.views ?? 0,
+    file_url: initial?.file_url ?? '',
+    size_text: initial?.size_text ?? '',
+  })
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -144,8 +155,8 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    let file_url: string | undefined
-    let size_text: string | undefined
+    let file_url: string | undefined = form.file_url || undefined
+    let size_text: string | undefined = form.size_text || undefined
 
     if (file) {
       setUploading(true)
@@ -171,14 +182,20 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
             {['PDF','Video','PPT','Checklist','Protocol','Link/URL','Image','Audio'].map(t => <option key={t}>{t}</option>)}
           </select>
         </div>
+        <div className="form-group"><label>Version</label>
+          <input value={form.latest_version} onChange={e => set('latest_version', e.target.value)} />
+        </div>
         <div className="form-group"><label>Tracking Rule</label>
           <select value={form.tracking_rule} onChange={e => set('tracking_rule', e.target.value)}>
             <option>View only</option><option>Acknowledge read</option><option>Download required</option>
           </select>
         </div>
       </div>
+      <div className="form-group"><label>Uploaded By</label>
+        <input value={form.uploaded_by} onChange={e => set('uploaded_by', e.target.value)} />
+      </div>
 
-      <div className="form-section-title">File Upload</div>
+      <div className="form-section-title">File {initial?.file_url ? '(replace optional)' : 'Upload'}</div>
       <div className="video-upload-area">
         {file ? (
           <div className="video-upload-selected">
@@ -188,6 +205,18 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
               <span className="video-upload-meta">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
             </div>
             <button type="button" className="btn btn-sm btn-outline" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = '' }}>Remove</button>
+          </div>
+        ) : initial?.file_url ? (
+          <div className="video-upload-existing">
+            <span className="video-upload-icon">📎</span>
+            <div className="video-upload-info">
+              <span className="video-upload-name">{initial.size_text ? `Uploaded — ${initial.size_text}` : 'File uploaded'}</span>
+            </div>
+            <div className="video-upload-actions">
+              <a href={initial.file_url} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline">Preview</a>
+              <label className="btn btn-sm btn-outline" htmlFor="material-file-input" style={{ cursor: 'pointer' }}>Replace</label>
+            </div>
+            <input id="material-file-input" ref={fileRef} type="file" onChange={handleFile} style={{ display: 'none' }} />
           </div>
         ) : (
           <label className="video-upload-drop" htmlFor="material-file-input">
@@ -208,7 +237,7 @@ function MaterialForm({ onSave }: { onSave: (d: Partial<Material> & { file_url?:
       </div>
       <div className="modal-form-actions">
         <button type="submit" className="btn btn-primary" disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading ? 'Uploading…' : initial ? 'Save Changes' : 'Upload'}
         </button>
       </div>
     </form>
