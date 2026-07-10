@@ -279,7 +279,6 @@ function LessonForm({
     setMatConfigs(c => ({ ...c, [id]: { ...c[id], [field]: value } }))
   }
 
-  const typeIcon: Record<string, string> = { PDF: '📄', Video: '🎬', PPT: '📊', Checklist: '✅', Protocol: '📋', 'Link/URL': '🔗', Image: '🖼️', Audio: '🎵' }
   const selectedIds = new Set(Object.keys(matConfigs))
 
   return (
@@ -330,7 +329,7 @@ function LessonForm({
           No materials in library yet. Upload materials first from the Materials screen.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto', paddingRight: 2 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 300, overflowY: 'auto', paddingRight: 2 }}>
           {allMaterials.map(m => {
             const sel = selectedIds.has(m.id)
             const cfg = matConfigs[m.id] ?? { watch_pct: 100, duration_text: '' }
@@ -342,73 +341,63 @@ function LessonForm({
                   borderRadius: 8,
                   overflow: 'hidden',
                   background: sel ? '#f0f9ff' : '#ffffff',
+                  cursor: 'pointer',
                 }}
+                onClick={() => toggleMat(m.id)}
               >
-                <div
-                  onClick={() => toggleMat(m.id)}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '20px 24px 1fr auto',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '10px 14px',
-                    cursor: 'pointer',
-                  }}
-                >
+                {/* Row: checkbox + title */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px' }}>
                   <input
                     type="checkbox"
                     checked={sel}
-                    onChange={() => toggleMat(m.id)}
+                    onChange={() => {}}
                     onClick={e => e.stopPropagation()}
-                    style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#0891b2' }}
                   />
-                  <span style={{ fontSize: 18, lineHeight: 1 }}>{typeIcon[m.type] ?? '📎'}</span>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b' }}>{m.title}</div>
-                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', lineHeight: 1.3 }}>{m.title}</div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
                       {m.type}{m.size_text ? ` · ${m.size_text}` : ''}
                     </div>
                   </div>
                   {sel && (
                     <span style={{
-                      fontSize: 11, fontWeight: 600, padding: '2px 8px',
+                      fontSize: 11, fontWeight: 700, padding: '3px 9px',
                       background: '#0891b2', color: '#fff', borderRadius: 20,
-                      whiteSpace: 'nowrap',
+                      whiteSpace: 'nowrap', flexShrink: 0,
                     }}>
-                      ✓ Selected
+                      Selected
                     </span>
                   )}
                 </div>
+
+                {/* Expanded config when selected */}
                 {sel && (
-                  <div style={{
-                    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
-                    padding: '0 14px 12px', borderTop: '1px solid #e0f2fe',
-                    background: '#f8fafc',
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Required Watch %
+                  <div
+                    style={{ borderTop: '1px solid #bae6fd', padding: '10px 14px', background: '#f0f9ff' }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#0c4a6e', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          Required Watch %
+                        </div>
+                        <input
+                          type="number" min={0} max={100}
+                          value={cfg.watch_pct}
+                          onChange={e => updateMatConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                        />
                       </div>
-                      <input
-                        type="number" min={0} max={100}
-                        value={cfg.watch_pct}
-                        onChange={e => updateMatConfig(m.id, 'watch_pct', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                        onClick={e => e.stopPropagation()}
-                        style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#1e293b', background: '#fff' }}
-                      />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Duration
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#0c4a6e', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          Duration
+                        </div>
+                        <input
+                          type="text"
+                          value={cfg.duration_text}
+                          placeholder="e.g. 10 min"
+                          onChange={e => updateMatConfig(m.id, 'duration_text', e.target.value)}
+                        />
                       </div>
-                      <input
-                        type="text"
-                        value={cfg.duration_text}
-                        placeholder="e.g. 10 min"
-                        onChange={e => updateMatConfig(m.id, 'duration_text', e.target.value)}
-                        onClick={e => e.stopPropagation()}
-                        style={{ width: '100%', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#1e293b', background: '#fff' }}
-                      />
                     </div>
                   </div>
                 )}
